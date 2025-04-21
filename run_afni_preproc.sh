@@ -68,7 +68,6 @@ afni_proc.py \
     -regress_est_blur_epits \
     -regress_est_blur_errts \
     -html_review_style   pythonic \
-    -jobs               ${N_JOBS} \
     -execute
 
 echo "✓ Finished sub-${SUBJ} → ${WORK_DIR}/results"
