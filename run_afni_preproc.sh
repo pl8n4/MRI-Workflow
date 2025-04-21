@@ -1,73 +1,74 @@
 #!/usr/bin/env bash
-##############################################################################
-# AFNI fMRI preprocessing (no‑argument version)
-#   • Edit ONLY the block below (“USER SETTINGS”).
-#   • Then run:  ./run_afni_preproc.sh          ← no extra typing!
-##############################################################################
-
+# ===========================================================================
+# AFNI fMRI preprocessing (single‐subject, cluster version)
+# Usage: ./run_afni_preproc_cluster.sh <SUBJECT_ID> [N_JOBS]
+# ===========================================================================
 set -euo pipefail
 
-# ======================= USER SETTINGS ======================================
-BIDS_ROOT="$(pwd)/Flanker"             # <— full path to your BIDS data
-DERIV_ROOT="$(pwd)/Flanker/derivatives"            # <— where outputs will go
-SUBJECTS=(08)                            # <— space‑separated list of subs
-N_JOBS=10                                       # <— cores to use
-OMP_NUM_THREADS=${OMP_NUM_THREADS:-$N_JOBS}    # respect env var if set
+# ----------------------- ARGUMENTS & CORES -------------------------
+if [[ $# -lt 1 ]]; then
+  echo "Usage: $0 <subject ID> [<N_JOBS>]"
+  exit 1
+fi
+SUBJ=$1
+N_JOBS=${2:-10}
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-$N_JOBS}
 
-# Optional preprocessing knobs
-T_PATTERN="alt+z2"     # slice‑timing pattern
-BLUR_SIZE=4.0          # smoothing FWHM (mm)
-CENS_MOT=0.3           # motion censor threshold (FD, mm)
-CENS_OUT=0.1           # outlier censor threshold (fraction)
-# ============================================================================
-export OMP_NUM_THREADS
+# ------------------------ DIRECTORY SETTINGS -----------------------
+# Assume this script lives in the dataset root (e.g. ~/ds00XXXXX)
+DATASET_ROOT="$(cd "$(dirname "$0")" && pwd)"
+BIDS_ROOT="$DATASET_ROOT"
+DERIV_ROOT="$DATASET_ROOT/derivatives"
 
+# ---------------------- PREPROCESSING OPTIONS ----------------------
+T_PATTERN="alt+z2"       # slice‐timing pattern
+BLUR_SIZE=4.0              # smoothing FWHM (mm)
+CENS_MOT=0.3               # motion censor threshold (FD, mm)
+CENS_OUT=0.1               # outlier censor threshold (fraction)
+
+# -------------------------- INFO HEADER ----------------------------
 echo "=== AFNI preprocessing =========================="
-echo "BIDS dir : $BIDS_ROOT"
-echo "Derivs dir: $DERIV_ROOT"
-echo "Subjects  : ${SUBJECTS[*]}"
-echo "OMP cores : $OMP_NUM_THREADS"
-echo "=================================================="
+echo "Dataset   : $DATASET_ROOT"
+echo "Subject   : $SUBJ"
+echo "Cores     : $OMP_NUM_THREADS"
+echo "=============================================="
 
-for SUBJ in "${SUBJECTS[@]}"; do
-  echo "--- Running sub-${SUBJ} ---"
+# ------------------------ WORKING DIRECTORY -----------------------
+WORK_DIR="$DERIV_ROOT/afni_preproc/sub-${SUBJ}"
+mkdir -p "$WORK_DIR" && cd "$WORK_DIR"
 
-  FUNC_DSETS=$(ls "${BIDS_ROOT}/sub-${SUBJ}/func/"*task-*_bold.nii* | sort)
-  ANAT_DSET=$(ls "${BIDS_ROOT}/sub-${SUBJ}/anat/"*T1w.nii* | head -n1)
-  WORK_DIR="${DERIV_ROOT}/afni_preproc/sub-${SUBJ}"
-  mkdir -p "$WORK_DIR" && cd "$WORK_DIR"
+# ------------------------ INPUT FILES -----------------------------
+FUNC_DSETS=$(ls "$BIDS_ROOT/sub-${SUBJ}/func/"*task-*_bold.nii* | sort)
+ANAT_DSET=$(ls "$BIDS_ROOT/sub-${SUBJ}/anat/"*T1w.nii* | head -n1)
 
-  afni_proc.py                                             \
-      -subj_id            ${SUBJ}                          \
-      -script             proc.${SUBJ}.tcsh                \
-      -out_dir            "${WORK_DIR}/results"            \
-      -dsets              ${FUNC_DSETS}                    \
-      -copy_anat          ${ANAT_DSET}                     \
-      -anat_has_skull     no                               \
-      -blocks despike tshift align tlrc volreg blur mask scale regress \
-      -tshift_opts_ts     -tpattern ${T_PATTERN}           \
-      -align_opts_aea     -giant_move -check_flip          \
-      -tlrc_base          MNI_avg152T1+tlrc                \
-      -tlrc_NL_warp                                       \
-      -volreg_align_to    MIN_OUTLIER                      \
-      -volreg_align_e2a                                   \
-      -volreg_tlrc_warp                                   \
-      -blur_size          ${BLUR_SIZE}                     \
-      -mask_apply         epi                              \
-      -regress_stim_times \
-          "${BIDS_ROOT}/sub-${SUBJ}/func/sub-${SUBJ}_task-*_events.tsv" \
-      -regress_stim_labels  cond1 cond2                    \
-      -regress_basis_multi 'BLOCK(4,1)' 'BLOCK(4,1)'       \
-      -regress_motion_per_run                             \
-      -regress_censor_motion  ${CENS_MOT}                  \
-      -regress_censor_outliers ${CENS_OUT}                 \
-      -regress_est_blur_epits                             \
-      -regress_est_blur_errts                             \
-      -html_review_style   pythonic                        \
-      -jobs               ${N_JOBS}                        \
-      -execute
+# ----------------------- AFNI_PROC COMMAND ------------------------
+afni_proc.py \
+    -subj_id            ${SUBJ} \
+    -script             proc.${SUBJ}.tcsh \
+    -out_dir            results \
+    -dsets              ${FUNC_DSETS} \
+    -copy_anat          ${ANAT_DSET} \
+    -anat_has_skull     no \
+    -blocks despike tshift align tlrc volreg blur mask scale regress \
+    -tshift_opts_ts     -tpattern ${T_PATTERN} \
+    -align_opts_aea     -giant_move -check_flip \
+    -tlrc_base          MNI_avg152T1+tlrc \
+    -tlrc_NL_warp \
+    -volreg_align_to    MIN_OUTLIER \
+    -volreg_align_e2a \
+    -volreg_tlrc_warp \
+    -blur_size          ${BLUR_SIZE} \
+    -mask_apply         epi \
+    -regress_stim_times "$BIDS_ROOT/sub-${SUBJ}/func/sub-${SUBJ}_task-*_events.tsv" \
+    -regress_stim_labels  cond1 cond2 \
+    -regress_basis_multi 'BLOCK(4,1)' 'BLOCK(4,1)' \
+    -regress_motion_per_run \
+    -regress_censor_motion  ${CENS_MOT} \
+    -regress_censor_outliers ${CENS_OUT} \
+    -regress_est_blur_epits \
+    -regress_est_blur_errts \
+    -html_review_style   pythonic \
+    -jobs               ${N_JOBS} \
+    -execute
 
-  echo "✓ Finished sub-${SUBJ} → ${WORK_DIR}/results"
-done
-
-echo "=== All subjects complete ==="
+echo "✓ Finished sub-${SUBJ} → ${WORK_DIR}/results"
