@@ -49,10 +49,10 @@ afni_proc.py \
     -dsets              ${FUNC_DSETS} \
     -copy_anat          ${ANAT_DSET} \
     -anat_has_skull     no \
-    -blocks despike tshift align tlrc volreg blur mask scale regress \
+    -blocks             despike tshift align tlrc volreg blur mask scale regress \
     -tshift_opts_ts     -tpattern ${T_PATTERN} \
     -align_opts_aea     -giant_move -check_flip \
-    -tlrc_base          MNI_avg152T1+tlrc \
+    -tlrc_base          MNI152_2009_template_SSW.nii.gz \
     -tlrc_NL_warp \
     -volreg_align_to    MIN_OUTLIER \
     -volreg_align_e2a \
@@ -61,7 +61,7 @@ afni_proc.py \
     -mask_apply         epi \
     -regress_stim_times "$BIDS_ROOT/sub-${SUBJ}/func/sub-${SUBJ}_task-*_events.tsv" \
     -regress_stim_labels  cond1 cond2 \
-    -regress_basis_multi 'BLOCK(4,1)' 'BLOCK(4,1)' \
+    -regress_basis_multi 'BLOCK(4,1)' \
     -regress_motion_per_run \
     -regress_censor_motion  ${CENS_MOT} \
     -regress_censor_outliers ${CENS_OUT} \
