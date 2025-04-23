@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================================
-# AFNI fMRI preprocessing (Example 6b‑style, cluster/cloud version)
+# AFNI fMRI preprocessing (Example 6b‑style, with auto timing generation)
 # Usage: ./run_afni_preproc_6b.sh <SUBJECT_ID> [N_JOBS]
 # ---------------------------------------------------------------------------
-#  * Designed to live in the root of your BIDS dataset directory (ds000xxx)
-#  * Keeps the Example 6b options intact while making all paths dynamic.
-#  * Requires that you have already run @SSwarper for each subject, such that
-#    the warped/anatQQ* files live under $DERIV_ROOT/sswarper/sub-<ID>/.
+#  * Drop this script in the root of your BIDS dataset (ds000xxx) on CloudLab.
+#  * Requires @SSwarper outputs in derivatives/sswarper/sub-<ID>/anat_warped/
+#  * If AFNI‑style timing files are missing, it will convert BIDS events.tsv
+#    to stim_times files automatically using AFNI's timing_tool.py.
 #  * Tested on CloudLab Ubuntu20 nodes with AFNI ≥ 24.0.00.
 # ============================================================================
 set -euo pipefail
@@ -21,10 +21,11 @@ N_JOBS=${2:-10}        # default to 10 CPU threads if not given
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-$N_JOBS}
 
 # ----------------------- DIRECTORY SETTINGS ---------------------------------
-# Assume this script lives in the dataset root (~/ds000157, etc.)
 DATASET_ROOT="$(cd "$(dirname "$0")" && pwd)"
 BIDS_ROOT="$DATASET_ROOT"
 DERIV_ROOT="$DATASET_ROOT/derivatives"
+STIM_DIR="$DERIV_ROOT/stimuli"
+mkdir -p "$STIM_DIR"
 
 # Where your @SSwarper outputs live (edit if you store them elsewhere)
 QWARP_DIR="$DERIV_ROOT/sswarper/sub-${SUBJ}/anat_warped"
@@ -46,14 +47,73 @@ mkdir -p "$WORK_DIR" && cd "$WORK_DIR"
 FUNC_DSETS=$(ls "$BIDS_ROOT/sub-${SUBJ}/func/"*task-*bold.nii* | sort)
 ANAT_ORIG=$(ls "$BIDS_ROOT/sub-${SUBJ}/anat/"*T1w.nii* | head -n1)
 
-# @SSwarper outputs (skull‑stripped + non‑linear warp dsets)
+# @SSwarper outputs
 ANAT_SS="$QWARP_DIR/anatSS.${SUBJ}.nii"
 ANAT_QWARP="$QWARP_DIR/anatQQ.${SUBJ}.nii"
 AFF12="$QWARP_DIR/anatQQ.${SUBJ}.aff12.1D"
 WARP="$QWARP_DIR/anatQQ.${SUBJ}_WARP.nii"
 
-# Stim timing files (edit the glob pattern or list manually if needed)
-STIM_FILES=( $(ls "$BIDS_ROOT/sub-${SUBJ}/func/"*events*.txt 2>/dev/null || true) )
+# ------------------------ HELPER: make timing files -------------------------
+make_timing_from_tsv() {
+  local tsv_files=( "$BIDS_ROOT/sub-${SUBJ}/func/"*events.tsv )
+  if [[ ! -e "${tsv_files[0]}" ]]; then
+    echo "ERROR: No events.tsv files found to auto‑generate timing." >&2
+    return 1
+  fi
+
+  echo "↻ Converting events.tsv → AFNI stim_times …"
+
+  # Detect column indices for onset, duration, trial_type from header
+  local header collist onset_i dur_i tt_i
+  header=$(head -n1 "${tsv_files[0]}")
+  IFS=$'\t' read -r -a collist <<< "$header"
+  for i in "${!collist[@]}"; do
+    case "${collist[$i]}" in
+      onset)      onset_i=$((i+1)); ;;
+      duration)   dur_i=$((i+1)); ;;
+      trial_type) tt_i=$((i+1)); ;;
+    esac
+  done
+  if [[ -z "${onset_i:-}" || -z "${dur_i:-}" || -z "${tt_i:-}" ]]; then
+    echo "ERROR: Couldn't infer onset/duration/trial_type columns." >&2
+    return 1
+  fi
+
+  # Gather unique condition names across all runs
+  local conds
+  conds=$(awk -v col=$tt_i -F'\t' 'NR>1 {print $col}' "${tsv_files[@]}" | sort -u)
+  [[ -z "$conds" ]] && { echo "ERROR: No trial_type values found." >&2; return 1; }
+
+  # Run timing_tool.py
+  timing_tool.py \
+      -tsv_events   "${tsv_files[@]}" \
+      -multi_timing "${STIM_DIR}/sub-${SUBJ}" \
+      -tsv_cols     onset duration trial_type \
+      -tsv_condval  ${conds} \
+      -write_timing_tr  \
+      -overwrite
+
+  # timing_tool writes *_<cond>.1D ; collect list
+}
+
+# -------------------- Find or auto‑generate stim files ----------------------
+STIM_FILES=( $(ls "$STIM_DIR/sub-${SUBJ}_"*.{1D,txt} 2>/dev/null || true) )
+if [ ${#STIM_FILES[@]} -eq 0 ]; then
+  make_timing_from_tsv || {
+    echo "✗ Could not build timing files; aborting." >&2
+    exit 1
+  }
+  STIM_FILES=( $(ls "$STIM_DIR/sub-${SUBJ}_"*.{1D,txt} 2>/dev/null) )
+fi
+
+# Build label list from filenames
+LABELS=()
+for f in "${STIM_FILES[@]}"; do
+  base=$(basename "$f")          # sub-05_<label>.1D
+  label=${base#sub-${SUBJ}_}
+  label=${label%.*}
+  LABELS+=("$label")
+done
 
 # -------------------------- AFNI_PROC COMMAND -------------------------------
 afni_proc.py \
@@ -79,9 +139,9 @@ afni_proc.py \
     -mask_epi_anat            yes \
     -blur_size                4.0 \
     -regress_stim_times       ${STIM_FILES[*]} \
-    -regress_stim_labels      vis aud \
+    -regress_stim_labels      ${LABELS[*]} \
     -regress_basis            'BLOCK(20,1)' \
-    -regress_opts_3dD         -jobs ${N_JOBS} -gltsym 'SYM: vis -aud' -glt_label 1 V-A \
+    -regress_opts_3dD         -jobs ${N_JOBS} -gltsym 'SYM: ${LABELS[0]} -${LABELS[1]:-baseline}' -glt_label 1 ${LABELS[0]}-vs-${LABELS[1]:-B} \
     -regress_motion_per_run \
     -regress_censor_motion    0.3 \
     -regress_censor_outliers  0.05 \
