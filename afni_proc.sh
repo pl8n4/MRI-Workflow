@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 ##############################################################################
-# run_subject_afni.sh
+# run_proc.sh
 # ---------------------------------------------------------------------------
 # Run afni_proc.py for a *single* BIDS‑style subject from the root of a dataset
 # (or any directory where the subject sub-<ID>/ folder lives).
 #
 # USAGE
-#   ./run_subject_afni.sh <SUBJECT_ID> [N_CORES]
+#   ./run_proc.sh <SUBJECT_ID> [N_CORES]
 #
 # EXAMPLE (run subj 01 with 6 CPU cores)
-#   ./run_subject_afni.sh 01 6
+#   ./run_proc.sh 01 6
 #
 # ARGUMENTS
 #   <SUBJECT_ID> : required, without the "sub-" prefix (e.g. "01", "FT")
