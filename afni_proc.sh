@@ -10,7 +10,7 @@
 # Derivatives from @SSwarper are expected in derivatives/sswarper/sub-XX/.
 #
 # -----------------------------------------------------------------------------
-# CHANGES (2025-04-28):
+# CHANGES (2025-04-28 to 04-30):
 #   * Replaced legacy AV1_vis / AV2_aud timing-file expectations with an
 #     automatic conversion of the subject's BIDS events.tsv into AFNI 1D timing
 #     files (food.1D and nonfood.1D).
@@ -18,6 +18,7 @@
 #     to use these generated timing files.
 #   * Updated TLRC_BASE to point to the absolute path of the AFNI template
 #     so that the input-check succeeds.
+#   * Added logic to remove existing output directory for clean re-runs.
 # -----------------------------------------------------------------------------
 
 # --- Script Setup ---
@@ -100,6 +101,12 @@ ls ${EPI_DSETS} 1>/dev/null 2>&1 || { echo "ERROR: EPI datasets not found matchi
 [[ -f "${TLRC_BASE}"    ]] || { echo "ERROR: TLRC base template not found: ${TLRC_BASE}"; exit 1; }
 
 echo "Input checks passed."
+
+# --- Handle existing output directory for clean re-run ---
+if [[ -d "${PROC_DIR}" ]]; then
+  echo "WARNING: Output directory ${PROC_DIR} already exists; removing it for fresh processing"
+  rm -rf "${PROC_DIR}"
+fi
 
 # --- Run afni_proc.py ---
 mkdir -p "${PROC_DIR}"
