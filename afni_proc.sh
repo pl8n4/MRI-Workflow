@@ -97,7 +97,6 @@ fi
 afni_proc.py \
   -subj_id               "${SUBJ_LABEL}" \
   -out_dir               "${PROC_DIR}" \
-  -script                "${PROC_DIR}/proc.${SUBJ_LABEL}.sh" \
   -scr_overwrite \
   -blocks                tshift align tlrc volreg mask blur scale regress \
   -copy_anat             "${ANAT_SS}" \
@@ -135,5 +134,4 @@ afni_proc.py \
 
 # --- Final messages ---
 echo -e "\n[INFO] afni_proc.py execution initiated for subject ${BIDS_SUBJ}."
-echo "[INFO] Check proc script: ${PROC_DIR}/proc.${SUBJ_LABEL}.sh"
-echo "[INFO] See log: ${PROC_DIR}/output.proc.${SUBJ_LABEL}.sh"
+echo "[INFO] Check proc script inside ${PROC_DIR} (file name created automatically)"
