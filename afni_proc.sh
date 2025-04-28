@@ -10,10 +10,11 @@
 # Derivatives from @SSwarper are expected in derivatives/sswarper/sub-XX/.
 #
 # -----------------------------------------------------------------------------
-# CHANGES (2025-04-28 to 04-30):
+# CHANGES (2025-04-28 to 05-01):
+#   * Added automatic conversion of anatQQ NIfTI to AFNI (+tlrc) format.
 #   * Auto-generate AFNI timing files from BIDS events.tsv.
 #   * Use absolute TLRC_BASE path for template.
-#   * Re-add removal of existing output directory so proc.*.sh runs fresh.
+#   * Clean existing output directory so proc.*.sh runs fresh.
 # -----------------------------------------------------------------------------
 
 set -euo pipefail  # exit on error, undefined var, or pipe failure
@@ -46,7 +47,15 @@ TLRC_BASE="/users/pl8n4/abin/MNI152_2009_template_SSW.nii.gz"
 # --- Derivatives (@SSwarper outputs) ---
 SSWARPER_DIR="derivatives/sswarper/${SUBJ_LABEL}"
 ANAT_SS="${SSWARPER_DIR}/anatSS.${SUBJ_LABEL}.nii"
-ANAT_QQ="${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}.nii"
+
+# Convert SSwarper .nii to AFNI +tlrc if needed
+if [[ ! -f "${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}+tlrc.HEAD" ]]; then
+  echo "Converting SSwarper output to AFNI format: anatQQ+tlrc"
+  3dcopy "${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}.nii" \
+         "${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}+tlrc"
+fi
+ANAT_QQ="${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}+tlrc"
+
 ANAT_AFFINE="${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}.aff12.1D"
 ANAT_WARP="${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}_WARP.nii"
 
@@ -54,7 +63,6 @@ ANAT_WARP="${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}_WARP.nii"
 TASK="passiveimageviewing"
 CONDITIONS=("food" "nonfood")
 EVTS="${BIDS_SUBJ}/func/${BIDS_SUBJ}_task-${TASK}_events.tsv"
-
 if [[ ! -f "${EVTS}" ]]; then
   echo "ERROR: events.tsv not found: ${EVTS}"
   exit 1
@@ -67,7 +75,6 @@ for cond in "${CONDITIONS[@]}"; do
       "${EVTS}" > "$out_1d"
   echo "  → ${out_1d} ($(wc -w < "$out_1d") onsets)"
 done
-
 STIM_FOOD="${BIDS_SUBJ}/food.1D"
 STIM_NONFOOD="${BIDS_SUBJ}/nonfood.1D"
 
@@ -77,7 +84,7 @@ PROC_DIR="derivatives/afni_proc/${BIDS_SUBJ}"
 # --- Input checks ---
 echo "Checking for necessary inputs …"
 [[ -f "${ANAT_SS}"     ]] || { echo "ERROR: Skull-stripped anat not found: ${ANAT_SS}"; exit 1; }
-[[ -f "${ANAT_QQ}"     ]] || { echo "ERROR: Warped anat (QQ) not found: ${ANAT_QQ}"; exit 1; }
+[[ -f "${ANAT_QQ}.HEAD" ]] || { echo "ERROR: AFNI anatQQ+tlrc not found: ${ANAT_QQ}+HEAD"; exit 1; }
 [[ -f "${ANAT_AFFINE}" ]] || { echo "ERROR: Affine transform not found: ${ANAT_AFFINE}"; exit 1; }
 [[ -f "${ANAT_WARP}"   ]] || { echo "ERROR: Nonlinear warp not found: ${ANAT_WARP}"; exit 1; }
 [[ -f "${ANAT_ORIGINAL_NIFTI}" ]] || { echo "ERROR: T1w NIfTI not found: ${ANAT_ORIGINAL_NIFTI}"; exit 1; }
@@ -85,7 +92,8 @@ ls ${EPI_DSETS} 1>/dev/null 2>&1 || { echo "ERROR: EPI datasets not found: ${EPI
 [[ -f "${STIM_FOOD}"    ]] || { echo "ERROR: Stim file missing: ${STIM_FOOD}"; exit 1; }
 [[ -f "${STIM_NONFOOD}" ]] || { echo "ERROR: Stim file missing: ${STIM_NONFOOD}"; exit 1; }
 [[ -f "${TLRC_BASE}"    ]] || { echo "ERROR: TLRC template not found: ${TLRC_BASE}"; exit 1; }
- echo "Input checks passed."
+
+echo "Input checks passed."
 
 # --- Clean previous outputs so proc.*.sh will run ---
 if [[ -d "${PROC_DIR}" ]]; then
@@ -134,4 +142,5 @@ afni_proc.py \
 
 # --- Final messages ---
 echo -e "\n[INFO] afni_proc.py execution initiated for subject ${BIDS_SUBJ}."
-echo "[INFO] Check proc script inside ${PROC_DIR} (file name created automatically)"
+echo "[INFO] Check proc script inside ${PROC_DIR}"
+echo "[INFO] See log inside ${PROC_DIR}"
