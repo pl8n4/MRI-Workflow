@@ -18,7 +18,8 @@
 #     to use these generated timing files.
 #   * Updated TLRC_BASE to point to the absolute path of the AFNI template
 #     so that the input-check succeeds.
-#   * Added logic to remove existing output directory for clean re-runs.
+#   * Removed manual creation/removal of output directory to prevent proc script
+#     from exiting early on existence checks. afni_proc.py will create it itself.
 # -----------------------------------------------------------------------------
 
 # --- Script Setup ---
@@ -81,10 +82,7 @@ STIM_FOOD="${BIDS_SUBJ}/food.1D"
 STIM_NONFOOD="${BIDS_SUBJ}/nonfood.1D"
 # =============================================================================
 
-# --- Outputs ---
-PROC_DIR="derivatives/afni_proc/${BIDS_SUBJ}"
-
-# --- Check Input Files ---
+# --- Outputs and Checks ---
 echo "Checking for necessary inputs …"
 # @SSwarper outputs
 [[ -f "${ANAT_SS}"     ]] || { echo "ERROR: Skull-stripped anat not found: ${ANAT_SS}";     exit 1; }
@@ -94,7 +92,7 @@ echo "Checking for necessary inputs …"
 # Raw BIDS files
 [[ -f "${ANAT_ORIGINAL_NIFTI}" ]] || { echo "ERROR: Original T1w NIfTI not found: ${ANAT_ORIGINAL_NIFTI}"; exit 1; }
 ls ${EPI_DSETS} 1>/dev/null 2>&1 || { echo "ERROR: EPI datasets not found matching pattern: ${EPI_DSETS}"; exit 1; }
-# Stimulus timing files produced above
+# Stimulus timing files
 [[ -f "${STIM_FOOD}"    ]] || { echo "ERROR: Stim file not found: ${STIM_FOOD}";    exit 1; }
 [[ -f "${STIM_NONFOOD}" ]] || { echo "ERROR: Stim file not found: ${STIM_NONFOOD}"; exit 1; }
 # TLRC template
@@ -102,19 +100,13 @@ ls ${EPI_DSETS} 1>/dev/null 2>&1 || { echo "ERROR: EPI datasets not found matchi
 
 echo "Input checks passed."
 
-# --- Handle existing output directory for clean re-run ---
-if [[ -d "${PROC_DIR}" ]]; then
-  echo "WARNING: Output directory ${PROC_DIR} already exists; removing it for fresh processing"
-  rm -rf "${PROC_DIR}"
-fi
-
-# --- Run afni_proc.py ---
-mkdir -p "${PROC_DIR}"
-
+# =============================================================================
+# === Run afni_proc.py (it will create and then execute the proc script) ======
+# =============================================================================
 afni_proc.py \
     -subj_id                 "${SUBJ_LABEL}" \
-    -out_dir                 "${PROC_DIR}" \
-    -script                  "${PROC_DIR}/proc.${SUBJ_LABEL}.sh" \
+    -out_dir                 "derivatives/afni_proc/${BIDS_SUBJ}" \
+    -script                  "derivatives/afni_proc/${BIDS_SUBJ}/proc.${SUBJ_LABEL}.sh" \
     -scr_overwrite \
     -blocks                  tshift align tlrc volreg mask blur scale regress \
     -copy_anat               "${ANAT_SS}" \
@@ -152,6 +144,4 @@ afni_proc.py \
     -execute
 
 echo -e "\n[INFO] afni_proc.py execution initiated for subject ${BIDS_SUBJ}."
-echo "[INFO] Check the output directory: ${PROC_DIR}"
-echo "[INFO] Monitor the proc script: ${PROC_DIR}/proc.${SUBJ_LABEL}.sh"
-echo "[INFO] And the output log: ${PROC_DIR}/output.proc.${SUBJ_LABEL}"
+echo "[INFO] Check the output directory: derivatives/afni_proc/${BIDS_SUBJ}" 
