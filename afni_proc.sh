@@ -16,6 +16,8 @@
 #     files (food.1D and nonfood.1D).
 #   * Updated stimulus-related input checks and afni_proc.py regression options
 #     to use these generated timing files.
+#   * Updated TLRC_BASE to point to the absolute path of the AFNI template
+#     so that the input-check succeeds.
 # -----------------------------------------------------------------------------
 
 # --- Script Setup ---
@@ -43,8 +45,9 @@ echo "----------------------------------"
 ANAT_ORIGINAL_NIFTI="${BIDS_SUBJ}/anat/${BIDS_SUBJ}_T1w.nii.gz"
 EPI_DSETS="${BIDS_SUBJ}/func/${BIDS_SUBJ}_task-*_bold.nii.gz"
 
-# TLRC template (MNI)
-TLRC_BASE="MNI152_2009_template_SSW.nii.gz"
+# --- Define TLRC template (MNI) ---
+# Updated to absolute path to satisfy input-check
+TLRC_BASE="/users/pl8n4/abin/MNI152_2009_template_SSW.nii.gz"
 
 # --- Derivatives (@SSwarper outputs) ---
 SSWARPER_DIR="derivatives/sswarper/${SUBJ_LABEL}"
@@ -68,7 +71,6 @@ fi
 echo "Generating timing files from ${EVTS} …"
 for cond in "${CONDITIONS[@]}"; do
   out_1d="${BIDS_SUBJ}/${cond}.1D"
-  # overwrite to stay current at every run
   awk -F $'\t' 'NR>1 && $3=="'"${cond}"'" {printf "%s ",$1} END {printf "\n"}' \
       "${EVTS}" > "$out_1d"
   echo "  → ${out_1d} ($(wc -w < "$out_1d") onsets)"
@@ -124,7 +126,6 @@ afni_proc.py \
     -volreg_compute_tsnr     yes \
     -mask_epi_anat           yes \
     -blur_size               4.0 \
-    # === CHANGES: use generated timing files ===
     -regress_stim_times      "${STIM_FOOD}" "${STIM_NONFOOD}" \
     -regress_stim_labels     food nonfood \
     -regress_basis           'BLOCK(20,1)' \
