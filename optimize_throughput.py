@@ -8,19 +8,17 @@ Key features
 ============
 * Auto-detect CPU cores & RAM via psutil.
 * Derive speed-scaling factor k by querying the actual CPU max frequency.
-* RAM- and CPU-aware: caps concurrency so total RSS and CPU threads never
-  exceed user-defined memory fraction (default 90%) and available cores.
+* RAM- and CPU-aware: caps concurrency so total RSS (based on mem-per-job) and CPU threads never exceed limits.
 * Input validation: ensures mem-per-job > 0 and safe-mem in (0,1].
 
 Usage examples
 --------------
 ```bash
-# 80 subjects, sswarper, each uses ~6 GB, leave 10% RAM free
 python optimize_fmri_throughput.py --workflow sswarper \
        --subjects 80 --mem-per-job 6 --safe-mem 0.9
 ```
+
 ```bash
-# override scale factor:
 python optimize_fmri_throughput.py --workflow afni_proc \
        --subjects 80 --mem-per-job 6 --freq-scale 1.2
 ```
@@ -46,11 +44,13 @@ RUNTIME_TABLE: Dict[str, Dict[int, float]] = {
                   8: 17.614, 12: 17.199, 16: 17.1055, 24: 16.937, 32: 17.129},
 }
 
+
 def positive_float(val: str) -> float:
     f = float(val)
     if f <= 0.0:
         raise argparse.ArgumentTypeError(f"invalid positive float value: {val}")
     return f
+
 
 def fraction_float(val: str) -> float:
     f = float(val)
@@ -91,9 +91,12 @@ def best_thread_count(
     """Return (best_threads, max_concurrency, jobs_per_h_at_ref_speed)."""
     usable_ram = total_ram * safe_frac
     best: tuple[float, int, int] | None = None
+    # Pre-calc RAM-based concurrency, independent of t
+    ram_conc = int(usable_ram // mem_per_job) or 1
     for t, rt_min in runtime_curve.items():
-        ram_conc = int(usable_ram // (mem_per_job * t)) or 1
+        # Number of jobs limited by CPU threads
         cpu_conc = cores // t or 1
+        # Combined limit
         conc = min(ram_conc, cpu_conc)
         tph = conc / rt_min * 60  # jobs/hour at reference speed
         cand = (tph, t, conc)
@@ -135,10 +138,9 @@ def main():
     args = parser.parse_args()
 
     cores, ram = detect_hardware()
-    if args.mem_per_job * args.safe_mem > ram:
+    if args.mem_per_job > ram:
         raise SystemExit(
-            f"mem-per-job ({args.mem_per_job} GB) * safe-mem ({args.safe_mem}) "
-            f"> total RAM {ram:.1f} GB"
+            f"mem-per-job ({args.mem_per_job} GB) exceeds total RAM {ram:.1f} GB"
         )
 
     curve = {t: m for t, m in RUNTIME_TABLE[args.workflow].items() if t <= cores}
@@ -162,7 +164,7 @@ def main():
             f"{REFERENCE_CPU_FREQ_MHZ:.0f}MHz = {k:.2f}×"
         )
 
-    # Correct throughput scaling: multiply by k (faster CPU => higher jobs/h)
+    # Scale throughput by k
     tph = ref_tph * k
     if args.subjects > 0:
         secs = args.subjects / tph * 3600
@@ -174,7 +176,7 @@ def main():
 
     print(f"Detected: {cores} physical cores, {ram:.1f} GB RAM")
     print(f"Workflow: {args.workflow}")
-    print(f"RAM/job: {args.mem_per_job} GB  safe_frac={args.safe_mem*100:.0f}%")
+    print(f"RAM limit allows {best_conc} jobs (mem-per-job={args.mem_per_job} GB)")
     print(f"Scaling factor k: {note}")
     print("\nOptimal (threads/job, concurrent jobs, jobs/hour):")
     print(tabulate(
