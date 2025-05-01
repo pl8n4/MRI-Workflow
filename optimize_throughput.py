@@ -10,7 +10,7 @@ Key features
 * Derive speed‑scaling factor k by querying actual CPU max frequency.
 * RAM‑ and CPU‑aware: caps concurrency so total RSS and CPU threads never exceed limits.
 * Two-phase batching: computes optimal config for full-size batches and the final remainder batch.
-* Shortcut logic for highly-core-loaded, few‑subject runs: ideal threads = cores/subjects (capped).
+* Shortcut logic for highly-core-loaded, few‑subject runs: ideal threads = cores/subjects (capped) with interpolation.
 * Input validation: ensures mem-per-job > 0 and safe-mem in (0,1].
 
 Usage examples
@@ -151,7 +151,7 @@ def main():
             "No entries ≤ available cores; expand RUNTIME_TABLE or use fewer cores."
         )
 
-    # Phase 1: full-batch recommendation (for baseline)
+    # Phase 1: full-batch recommendation
     best_t_full, best_conc_full, ref_tph_full = best_thread_count(
         curve, ram, args.mem_per_job, args.safe_mem, cores
     )
@@ -176,29 +176,39 @@ def main():
     print(f"Max concurrency: {best_conc_full} jobs (RAM cap={ram_cap_jobs}, CPU cap={cpu_cap_jobs})")
     print(f"Scaling factor k: {note}")
 
-    # ---- Ideal shortcut: threads/job = cores/subjects (capped) ----
+    # Ideal shortcut: threads/job = cores/subjects (capped)
     if args.subjects > 0 and cores > args.subjects:
         ideal = max(1, cores // args.subjects)
         ideal = min(ideal, CAP_THREADS)
-        # pick nearest available benchmark ≤ ideal
-        valid_ts = sorted([t for t in RUNTIME_TABLE[args.workflow] if t <= ideal])
-        if valid_ts:
-            best_t = valid_ts[-1]
-            best_conc = args.subjects
-            rt_min = RUNTIME_TABLE[args.workflow][best_t]
-            tph = best_conc / rt_min * 60 * k
-            print(f"\nOptimal config (ideal) for {args.subjects} subjects:")
-            print(tabulate(
-                [[best_t, best_conc, f"{tph:,.1f}" ]],
-                headers=["thr/job","jobs","jobs/h"], tablefmt="plain"
-            ))
-            t_sec = args.subjects / tph * 3600
-            h = int(t_sec // 3600)
-            m = int((t_sec % 3600) // 60)
-            print(f"Time for {args.subjects} subjects: {h} h {m} m")
-            return
+        keys = sorted(RUNTIME_TABLE[args.workflow].keys())
+        if ideal in RUNTIME_TABLE[args.workflow]:
+            rt_min = RUNTIME_TABLE[args.workflow][ideal]
+        else:
+            lower = max((t for t in keys if t < ideal), default=None)
+            upper = min((t for t in keys if t > ideal), default=None)
+            if lower is not None and upper is not None:
+                m_low = RUNTIME_TABLE[args.workflow][lower]
+                m_high = RUNTIME_TABLE[args.workflow][upper]
+                rt_min = m_low + (m_high - m_low) * (ideal - lower) / (upper - lower)
+            else:
+                t_near = lower if lower is not None else upper
+                rt_min = RUNTIME_TABLE[args.workflow][t_near]
+                ideal = t_near
+        best_t = ideal
+        best_conc = args.subjects
+        tph = best_conc / rt_min * 60 * k
+        print(f"\nOptimal config (ideal) for {args.subjects} subjects:")
+        print(tabulate(
+            [[best_t, best_conc, f"{tph:,.1f}"]],
+            headers=["thr/job", "jobs", "jobs/h"], tablefmt="plain"
+        ))
+        total_time = args.subjects / tph * 3600
+        h = int(total_time // 3600)
+        m = int((total_time % 3600) // 60)
+        print(f"Time for {args.subjects} subjects: {h} h {m} m")
+        return
 
-    # ---- Single-batch skip logic if subjects ≤ full concurrency ----
+    # Single-batch skip logic if subjects ≤ full concurrency
     if args.subjects > 0 and args.subjects <= best_conc_full:
         total = args.subjects
         best_t, best_conc, ref_tph = best_thread_count(
@@ -208,20 +218,20 @@ def main():
         tph = ref_tph * k
         print(f"\nOptimal config for {total} subjects:")
         print(tabulate(
-            [[best_t, best_conc, f"{tph:,.1f}" ]],
-            headers=["thr/job","jobs","jobs/h"], tablefmt="plain"
+            [[best_t, best_conc, f"{tph:,.1f}"]],
+            headers=["thr/job", "jobs", "jobs/h"], tablefmt="plain"
         ))
-        t = total / tph * 3600
-        h = int(t // 3600)
-        m = int((t % 3600) // 60)
+        total_time = total / tph * 3600
+        h = int(total_time // 3600)
+        m = int((total_time % 3600) // 60)
         print(f"Time for {total} subjects: {h} h {m} m")
         return
 
-    # ---- Two-phase fallback ----
+    # Two-phase fallback
     print("\nPhase 1: full batches optimal config:")
     print(tabulate(
-        [[best_t_full, best_conc_full, f"{tph_full:,.1f}" ]],
-        headers=["thr/job","jobs","jobs/h"], tablefmt="plain"
+        [[best_t_full, best_conc_full, f"{tph_full:,.1f}"]],
+        headers=["thr/job", "jobs", "jobs/h"], tablefmt="plain"
     ))
 
     if args.subjects > 0:
@@ -245,14 +255,14 @@ def main():
             m2 = int((t2 % 3600) // 60)
             print("\nPhase 2: remainder batch optimal config:")
             print(tabulate(
-                [[best_t_rem, best_conc_rem, f"{tph_rem:,.1f}" ]],
-                headers=["thr/job","jobs","jobs/h"], tablefmt="plain"
+                [[best_t_rem, best_conc_rem, f"{tph_rem:,.1f}"]],
+                headers=["thr/job", "jobs", "jobs/h"], tablefmt="plain"
             ))
             print(f"Time for {remainder} subjects: {h2} h {m2} m")
 
-            t_tot = t1 + t2
-            ht = int(t_tot // 3600)
-            mt = int((t_tot % 3600) // 60)
+            total_time = t1 + t2
+            ht = int(total_time // 3600)
+            mt = int((total_time % 3600) // 60)
             print(f"\nTotal wall-time estimated: {ht} h {mt} m")
 
 
