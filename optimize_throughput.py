@@ -34,7 +34,7 @@ except ImportError:
     raise SystemExit("tabulate not installed. ➜ pip install tabulate")
 
 # Reference CPU freq for original benchmark (MHz)
-REFERENCE_CPU_FREQ_MHZ = 2600.0
+REFERENCE_CPU_FREQ_MHZ = 3700.0
 
 # Reference runtimes (minutes) for thread counts
 RUNTIME_TABLE: Dict[str, Dict[int, float]] = {
