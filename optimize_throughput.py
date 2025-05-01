@@ -6,7 +6,7 @@ current machine resources, and user-supplied RAM needs.
 
 Key features
 ============
-* Auto-detect CPU cores & RAM via psutil (physical or logical).
+* Auto-detect logical CPU cores & RAM via psutil.
 * Derive speed-scaling factor k by querying actual CPU max frequency.
 * RAM- and CPU-aware: caps concurrency so total RSS and CPU threads never exceed limits.
 * Two-phase batching: computes optimal config for full-size batches and the final remainder batch.
@@ -16,7 +16,7 @@ Usage examples
 --------------
 ```bash
 python optimize_fmri_throughput.py --workflow sswarper \
-       --subjects 100 --mem-per-job 5 --safe-mem 0.9 --logical-cores
+       --subjects 100 --mem-per-job 5 --safe-mem 0.9
 ```
 ```bash
 python optimize_fmri_throughput.py --workflow afni_proc \
@@ -34,14 +34,18 @@ except ImportError:
     raise SystemExit("tabulate not installed. ➜ pip install tabulate")
 
 # Reference CPU freq for original benchmark (MHz)
-REFERENCE_CPU_FREQ_MHZ = 2600.0
+REFERENCE_CPU_FREQ_MHZ = 3700.0
 
 # Reference runtimes (minutes) for thread counts
 RUNTIME_TABLE: Dict[str, Dict[int, float]] = {
-    "sswarper": {1: 125.98, 2: 86.935, 3: 74.313, 4: 65.29,
-                  8: 50.255, 12: 45.99, 16: 44.35, 24: 43.75, 32: 44.4},
-    "afni_proc": {1: 23.802, 2: 20.75, 3: 19.078, 4: 18.954,
-                  8: 17.614, 12: 17.199, 16: 17.1055, 24: 16.937, 32: 17.129},
+    "sswarper": {
+        1: 125.98, 2: 86.935, 3: 74.313, 4: 65.29,
+        8: 50.255, 12: 45.99, 16: 44.35, 24: 43.75, 32: 44.4
+    },
+    "afni_proc": {
+        1: 23.802, 2: 20.75, 3: 19.078, 4: 18.954,
+        8: 17.614, 12: 17.199, 16: 17.1055, 24: 16.937, 32: 17.129
+    },
 }
 
 
@@ -61,12 +65,9 @@ def fraction_float(val: str) -> float:
     return f
 
 
-def detect_hardware(use_logical: bool = False) -> Tuple[int, float]:
-    """Return (cores, total_RAM_GB), using logical or physical cores."""
-    cores = psutil.cpu_count(logical=use_logical)
-    # Fallback if None
-    if cores is None:
-        cores = psutil.cpu_count(logical=not use_logical) or 1
+def detect_hardware() -> Tuple[int, float]:
+    """Return (logical_cores, total_RAM_GB)."""
+    cores = psutil.cpu_count(logical=True) or 1
     total_ram = psutil.virtual_memory().total / 1024**3
     return cores, total_ram
 
@@ -101,7 +102,7 @@ def best_thread_count(
         conc = min(ram_conc, cpu_conc)
         if max_jobs is not None:
             conc = min(conc, max_jobs)
-        tph = conc / rt_min * 60  # jobs/hour at reference speed
+        tph = conc / rt_min * 60
         cand = (tph, t, conc)
         if best is None or cand > best:
             best = cand
@@ -109,8 +110,8 @@ def best_thread_count(
         raise RuntimeError(
             "No valid thread count – check mem-per-job or RUNTIME_TABLE."
         )
-    tph, tb, cb = best
-    return tb, cb, tph
+    _, tb, cb = best
+    return tb, cb, best[0]
 
 
 def main():
@@ -138,13 +139,9 @@ def main():
         "--freq-scale", type=positive_float,
         help="Override speed-scaling factor k"
     )
-    parser.add_argument(
-        "--logical-cores", action="store_true", default=False,
-        help="Use logical CPU count (including hyperthreads) instead of physical cores"
-    )
     args = parser.parse_args()
 
-    cores, ram = detect_hardware(args.logical_cores)
+    cores, ram = detect_hardware()
     if args.mem_per_job > ram:
         raise SystemExit(
             f"mem-per-job ({args.mem_per_job} GB) exceeds total RAM {ram:.1f} GB"
@@ -174,9 +171,13 @@ def main():
 
     tph_full = ref_tph_full * k
 
-    print(f"Detected: {cores} cores, {ram:.1f} GB RAM ({'logical' if args.logical_cores else 'physical'} count)")
+    # Clarify RAM vs CPU caps
+    ram_cap_jobs = int(ram * args.safe_mem // args.mem_per_job) or 1
+    cpu_cap_jobs = cores // best_t_full or 1
+
+    print(f"Detected: {cores} logical cores, {ram:.1f} GB RAM")
     print(f"Workflow: {args.workflow}")
-    print(f"RAM limit allows {best_conc_full} jobs (mem-per-job={args.mem_per_job} GB)")
+    print(f"Max concurrency: {best_conc_full} jobs (RAM cap={ram_cap_jobs}, CPU cap={cpu_cap_jobs})")
     print(f"Scaling factor k: {note}")
 
     # Show full-phase recommendation
