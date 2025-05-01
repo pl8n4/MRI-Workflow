@@ -9,7 +9,7 @@ Key features
 * Auto-detect CPU cores & RAM via psutil.
 * Derive speed-scaling factor k by querying the actual CPU max frequency.
 * RAM- and CPU-aware: caps concurrency so total RSS and CPU threads never
-  exceed a user-defined fraction of memory (default 90%) and available cores.
+  exceed user-defined memory fraction (default 90%) and available cores.
 * Input validation: ensures mem-per-job > 0 and safe-mem in (0,1].
 
 Usage examples
@@ -18,7 +18,7 @@ Usage examples
 # 80 subjects, sswarper, each uses ~6 GB, leave 10% RAM free
 python optimize_fmri_throughput.py --workflow sswarper \
        --subjects 80 --mem-per-job 6 --safe-mem 0.9
-```  
+```
 ```bash
 # override scale factor:
 python optimize_fmri_throughput.py --workflow afni_proc \
@@ -162,7 +162,8 @@ def main():
             f"{REFERENCE_CPU_FREQ_MHZ:.0f}MHz = {k:.2f}×"
         )
 
-    tph = ref_tph / k
+    # Correct throughput scaling: multiply by k (faster CPU => higher jobs/h)
+    tph = ref_tph * k
     if args.subjects > 0:
         secs = args.subjects / tph * 3600
         h = int(secs // 3600)
