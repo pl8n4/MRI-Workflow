@@ -1,194 +1,186 @@
 #!/usr/bin/env python3
 """
-optimize_fmri_throughput.py  ▸  Recommend thread‑count (cores per subject)
-for AFNI @SSwarper or afni_proc.py based on reference speed‑up curves,
-current machine resources, and user‑supplied RAM needs.
-
-Why this works
---------------
-For each thread‑count **t**, throughput is  jobs/h_t = concurrency_t / runtime_t.
-Your measured **runtime★_t** on a reference box supplies the *shape* of the
-curve.  On a new machine every runtime is multiplied by the same unknown
-factor **k**.  Because *k* cancels when comparing candidates, the ranking of
-thread‑counts is hardware‑independent.  A quick micro‑benchmark gives us *k*
-only if you want wall‑clock predictions.
+optimize_fmri_throughput.py  ▸  Recommend thread-count (cores per subject)
+for AFNI @SSwarper or afni_proc.py based on reference speed-up curves,
+current machine resources, and user-supplied RAM needs.
 
 Key features
 ============
-* Auto‑detect CPU cores and RAM via **psutil** (cross‑platform).
-* Handles both @SSwarper and afni_proc with built‑in reference curves.
-* RAM‑aware: caps concurrency so total RSS never exceeds a user‑defined
-  fraction of physical memory (default 90 %).
-* **FAST** micro‑benchmark (`--quick-bench cpu`) – a single 2048×2048 FP32
-  matrix multiply – adds ≈ 5 s but saves hour‑long calibration runs.
-* Clear CLI report with the **tabulate** library.
+* Auto-detect CPU cores & RAM via psutil.
+* Derive speed-scaling factor k by querying the actual CPU max frequency.
+* RAM-aware: caps concurrency so total RSS never exceeds a
+  user-defined fraction of physical memory (default 90%).
+* Input validation: ensures mem-per-job > 0 and safe-mem in (0,1].
 
 Usage examples
 --------------
 ```bash
-# 80 subjects, expect each job to peak at 6 GB, leave 10 % RAM headroom
+# 80 subjects, sswarper, each uses ~6 GB, leave 10% RAM free
 python optimize_fmri_throughput.py --workflow sswarper \
-       --subjects 80 --mem-per-job 6
-
-# Skip micro‑benchmark, just pick best threads and show relative jobs/h
-python optimize_fmri_throughput.py --workflow afni_proc --quick-bench none
+       --subjects 80 --mem-per-job 6 --safe-mem 0.9
+```  
+```bash
+# force a custom scale factor:
+python optimize_fmri_throughput.py --workflow afni_proc \
+       --subjects 80 --mem-per-job 6 --freq-scale 1.2
 ```
 """
 from __future__ import annotations
-
 import argparse
-import math
-import time
 from typing import Dict, Tuple
+import psutil
 
-try:
-    import psutil
-except ImportError as e:  # pragma: no cover
-    raise SystemExit("psutil not installed.  ➜  pip install psutil") from e
 try:
     from tabulate import tabulate
-except ImportError as e:  # pragma: no cover
-    raise SystemExit("tabulate not installed.  ➜  pip install tabulate") from e
+except ImportError:
+    raise SystemExit("tabulate not installed. ➜ pip install tabulate")
 
-# ---------------------------- Reference curves ----------------------------- #
-# Average runtime per subject (minutes) vs. threads collected on a 56‑core,
-# 125 GB AMD EPYC 7513 node running CentOS 8.
-# Extend/replace if you have newer data.
+# Reference CPU freq for original benchmark (MHz)
+REFERENCE_CPU_FREQ_MHZ = 2600.0
+
+# Reference runtimes (minutes) for 1,2,3,... threads
 RUNTIME_TABLE: Dict[str, Dict[int, float]] = {
-    "sswarper": {
-        1: 125.98, 2: 86.935, 3: 74.313, 4: 65.29,
-        8: 50.255, 12: 45.99, 16: 44.35, 24: 43.75, 32: 44.4,
-    },
-    "afni_proc": {
-        1: 23.802, 2: 20.75, 3: 19.078, 4: 18.954,
-        8: 17.614, 12: 17.199, 16: 17.1055, 24: 16.937, 32: 17.129,
-    },
+    "sswarper": {1: 125.98, 2: 86.935, 3: 74.313, 4: 65.29,
+                  8: 50.255,12: 45.99,16: 44.35,24: 43.75,32: 44.4},
+    "afni_proc": {1: 23.802,2: 20.75,3: 19.078,4: 18.954,
+                  8: 17.614,12: 17.199,16: 17.1055,24:16.937,32:17.129},
 }
 
-# -------------- Micro‑benchmark (matrix multiply) reference ---------------- #
-# On the same reference node above, multiplying two 2048×2048 FP32 matrices
-# using NumPy + OpenBLAS (single process) takes ≈ 0.57 s.
-MICRO_BENCH_REF_SEC = 0.57
+def positive_float(val: str) -> float:
+    f = float(val)
+    if f <= 0.0:
+        raise argparse.ArgumentTypeError(f"invalid positive float value: {val}")
+    return f
 
+def fraction_float(val: str) -> float:
+    f = float(val)
+    if not (0.0 < f <= 1.0):
+        raise argparse.ArgumentTypeError(
+            f"invalid fraction for safe-mem (must be >0 and ≤1): {val}"
+        )
+    return f
 
-# --------------------------------------------------------------------------- #
-#                               Helper functions                              #
-# --------------------------------------------------------------------------- #
 
 def detect_hardware() -> Tuple[int, float]:
     """Return (physical_cores, total_RAM_GB)."""
-    phys = psutil.cpu_count(logical=False) or psutil.cpu_count(logical=True)
-    ram_gb = psutil.virtual_memory().total / 1024 ** 3  # bytes → GB
-    return phys, ram_gb
+    cores = psutil.cpu_count(logical=False) or psutil.cpu_count()
+    total_ram = psutil.virtual_memory().total / 1024**3
+    return cores, total_ram
 
 
-def quick_cpu_bench() -> float:
-    """Time a single 2048×2048 FP32 GEMM using NumPy. Returns wall time (sec)."""
-    import numpy as np
+def detect_cpu_freq_mhz() -> float:
+    """Query CPU max frequency: psutil, fallback to /proc/cpuinfo."""
+    freq = psutil.cpu_freq()
+    if freq and freq.max:
+        return freq.max
+    try:
+        with open('/proc/cpuinfo') as f:
+            mhzs = [float(line.split(':')[1]) for line in f if 'cpu MHz' in line]
+        return sum(mhzs) / len(mhzs)
+    except Exception:
+        return freq.current if freq and freq.current else REFERENCE_CPU_FREQ_MHZ
 
-    n = 2048
-    a = np.random.randn(n, n).astype(np.float32)
-    b = np.random.randn(n, n).astype(np.float32)
-    start = time.perf_counter()
-    _ = a @ b
-    return time.perf_counter() - start
-
-
-# --------------------------------------------------------------------------- #
-#                               Core algorithm                                #
-# --------------------------------------------------------------------------- #
 
 def best_thread_count(
     runtime_curve: Dict[int, float],
-    total_ram_gb: float,
+    total_ram: float,
     mem_per_job: float,
-    safe_mem_frac: float,
+    safe_frac: float,
 ) -> Tuple[int, int, float]:
-    """Return (threads_per_job, max_concurrency, jobs_per_hour)."""
-    usable_ram = total_ram_gb * safe_mem_frac
-    best = None  # (jobs_per_h, t, concurrency)
-
-    for t, runtime_min in runtime_curve.items():
-        concurrency = max(int(usable_ram // (mem_per_job * t)), 1)
-        jobs_per_h = concurrency / runtime_min * 60  # min → h
-        candidate = (jobs_per_h, t, concurrency)
-        if best is None or candidate > best:
-            best = candidate
-
+    """Return (best_threads, max_concurrency, jobs_per_h_at_ref_speed)."""
+    usable = total_ram * safe_frac
+    best = None
+    for t, rt_min in runtime_curve.items():
+        conc = max(int(usable // (mem_per_job * t)), 1)
+        tph = conc / rt_min * 60  # jobs/hour at reference speed
+        cand = (tph, t, conc)
+        if best is None or cand > best:
+            best = cand
     if best is None:
-        raise RuntimeError("No valid thread count found – check inputs")
+        raise RuntimeError(
+            "No valid thread count – check mem-per-job or RUNTIME_TABLE."
+        )
+    _, tb, cb = best
+    return tb, cb, best[0]
 
-    jobs_per_h, t_best, concurrency_best = best
-    return t_best, concurrency_best, jobs_per_h
 
-
-def main():  # noqa: C901
+def main():
     parser = argparse.ArgumentParser(
         description="Recommend optimal cores/subject for AFNI pipelines.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--workflow", choices=RUNTIME_TABLE.keys(), required=True,
-                        help="Which benchmark curve to use (sswarper or afni_proc)")
-    parser.add_argument("--subjects", type=int, default=0,
-                        help="Number of subjects to process (0 → skip ETA calc)")
-    parser.add_argument("--mem-per-job", type=float, required=True,
-                        help="Peak resident memory per subject (GB)")
-    parser.add_argument("--safe-mem", type=float, default=0.9,
-                        help="Fraction of total RAM allowed for jobs")
-    parser.add_argument("--quick-bench", choices=["cpu", "none"], default="cpu",
-                        help="Run micro‑benchmark to scale wall‑time estimates")
-    parser.add_argument("--freq-scale", type=float,
-                        help="Override scaling factor k (1.0 → same speed as ref)")
-
+    parser.add_argument(
+        "--workflow", choices=RUNTIME_TABLE,
+        required=True, help="Which curve to use."
+    )
+    parser.add_argument(
+        "--subjects", type=int, default=0,
+        help="# of subjects (0 → skip ETA)"
+    )
+    parser.add_argument(
+        "--mem-per-job", type=positive_float, required=True,
+        help="Peak RAM per job (GB, must be >0)"
+    )
+    parser.add_argument(
+        "--safe-mem", type=fraction_float, default=0.9,
+        help="Fraction of RAM to use (must be >0 and ≤1)"
+    )
+    parser.add_argument(
+        "--freq-scale", type=positive_float,
+        help="Override speed-scaling factor k"
+    )
     args = parser.parse_args()
 
-    phys_cores, total_ram = detect_hardware()
-
-    if args.mem_per_job * args.safe_mem > total_ram:
+    cores, ram = detect_hardware()
+    if args.mem_per_job * args.safe_mem > ram:
         raise SystemExit(
-            f"mem‑per‑job ({args.mem_per_job} GB) too high for total RAM {total_ram:.1f} GB")
+            f"mem-per-job ({args.mem_per_job} GB) * safe-mem ({args.safe_mem}) "
+            f"> total RAM {ram:.1f} GB"
+        )
 
-    runtime_curve = {t: m for t, m in RUNTIME_TABLE[args.workflow].items() if t <= phys_cores}
-    if not runtime_curve:
-        raise SystemExit("No benchmark entries ≤ available cores; extend RUNTIME_TABLE?")
+    curve = {t: m for t, m in RUNTIME_TABLE[args.workflow].items() if t <= cores}
+    if not curve:
+        raise SystemExit(
+            "No entries ≤ available cores; expand RUNTIME_TABLE or use fewer cores."
+        )
 
-    t_best, conc_best, jobs_per_h = best_thread_count(
-        runtime_curve, total_ram, args.mem_per_job, args.safe_mem)
+    best_t, best_conc, ref_tph = best_thread_count(
+        curve, ram, args.mem_per_job, args.safe_mem
+    )
 
-    # ------ scaling factor k ------------------------------------------------ #
-    if args.freq_scale is not None:
+    # scaling factor k
+    if args.freq_scale:
         k = args.freq_scale
-        scale_note = f"(user‑supplied {k:.2f}×)"
-    elif args.quick_bench == "cpu":
-        bench_t = quick_cpu_bench()
-        k = bench_t / MICRO_BENCH_REF_SEC
-        scale_note = f"(CPU micro‑bench {bench_t:.2f} s  ⇒  k = {k:.2f}×)"
-    else:  # quick‑bench none
-        k = 1.0
-        scale_note = "(reference speed; estimates may differ)"
-
-    # scaled throughput & ETA
-    scaled_jobs_per_h = jobs_per_h / k
-    rows = [[t_best, conc_best, f"{scaled_jobs_per_h:,.2f}"]]
-
-    if args.subjects > 0:
-        hours = args.subjects / scaled_jobs_per_h
-        eta_str = time.strftime("%‑H h %‑M m", time.gmtime(hours * 3600))
+        note = f"user-supplied k={k:.2f}x"
     else:
-        eta_str = "n/a"
+        cpu_mhz = detect_cpu_freq_mhz()
+        k = cpu_mhz / REFERENCE_CPU_FREQ_MHZ
+        note = (
+            f"detected CPU max {cpu_mhz:.0f}MHz / "
+            f"{REFERENCE_CPU_FREQ_MHZ:.0f}MHz = {k:.2f}x"
+        )
 
-    # --------------------- Report ------------------------------------------ #
-    print()
-    print(f"Detected: {phys_cores} physical cores, {total_ram:.1f} GB RAM")
-    print(f"Workflow : {args.workflow}")
-    print(f"RAM/headroom  : {args.mem_per_job} GB/job  •  safe mem frac = {args.safe_mem*100:.0f}%")
-    print(f"Scaling factor k  {scale_note}")
-    print("\nOptimal configuration (RAM‑safe):")
-    print(tabulate(rows, headers=["threads/job", "jobs", "jobs/hour"], tablefmt="rounded_grid"))
-    if args.subjects:
-        print(f"\nEstimated total wall‑time for {args.subjects} subjects: {eta_str}")
-    print()
+    tph = ref_tph / k
+    if args.subjects > 0:
+        secs = args.subjects / tph * 3600
+        h = int(secs // 3600);
+        m = int((secs % 3600) // 60)
+        eta = f"{h} h {m} m"
+    else:
+        eta = "n/a"
 
+    print(f"Detected: {cores} physical cores, {ram:.1f} GB RAM")
+    print(f"Workflow: {args.workflow}")
+    print(f"RAM/job: {args.mem_per_job} GB  safe_frac={args.safe_mem*100:.0f}%")
+    print(f"Scaling factor k: {note}")
+    print("\nOptimal (threads/job, concurrent jobs, jobs/hour):")
+    print(tabulate(
+        [[best_t, best_conc, f"{tph:,.1f}"]],
+        headers=["thr/job","jobs","jobs/h"],
+        tablefmt="plain"
+    ))
+    if args.subjects > 0:
+        print(f"Estimated total wall-time ({args.subjects} subj): {eta}")
 
 if __name__ == "__main__":
     main()
