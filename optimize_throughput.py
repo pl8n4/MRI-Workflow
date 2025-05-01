@@ -8,8 +8,8 @@ Key features
 ============
 * Auto-detect CPU cores & RAM via psutil.
 * Derive speed-scaling factor k by querying the actual CPU max frequency.
-* RAM-aware: caps concurrency so total RSS never exceeds a
-  user-defined fraction of physical memory (default 90%).
+* RAM- and CPU-aware: caps concurrency so total RSS and CPU threads never
+  exceed a user-defined fraction of memory (default 90%) and available cores.
 * Input validation: ensures mem-per-job > 0 and safe-mem in (0,1].
 
 Usage examples
@@ -20,7 +20,7 @@ python optimize_fmri_throughput.py --workflow sswarper \
        --subjects 80 --mem-per-job 6 --safe-mem 0.9
 ```  
 ```bash
-# force a custom scale factor:
+# override scale factor:
 python optimize_fmri_throughput.py --workflow afni_proc \
        --subjects 80 --mem-per-job 6 --freq-scale 1.2
 ```
@@ -36,14 +36,14 @@ except ImportError:
     raise SystemExit("tabulate not installed. ➜ pip install tabulate")
 
 # Reference CPU freq for original benchmark (MHz)
-REFERENCE_CPU_FREQ_MHZ = 3700.0
+REFERENCE_CPU_FREQ_MHZ = 2600.0
 
-# Reference runtimes (minutes) for 1,2,3,... threads
+# Reference runtimes (minutes) for thread counts
 RUNTIME_TABLE: Dict[str, Dict[int, float]] = {
     "sswarper": {1: 125.98, 2: 86.935, 3: 74.313, 4: 65.29,
-                  8: 50.255,12: 45.99,16: 44.35,24: 43.75,32: 44.4},
-    "afni_proc": {1: 23.802,2: 20.75,3: 19.078,4: 18.954,
-                  8: 17.614,12: 17.199,16: 17.1055,24:16.937,32:17.129},
+                  8: 50.255, 12: 45.99, 16: 44.35, 24: 43.75, 32: 44.4},
+    "afni_proc": {1: 23.802, 2: 20.75, 3: 19.078, 4: 18.954,
+                  8: 17.614, 12: 17.199, 16: 17.1055, 24: 16.937, 32: 17.129},
 }
 
 def positive_float(val: str) -> float:
@@ -86,12 +86,15 @@ def best_thread_count(
     total_ram: float,
     mem_per_job: float,
     safe_frac: float,
+    cores: int
 ) -> Tuple[int, int, float]:
     """Return (best_threads, max_concurrency, jobs_per_h_at_ref_speed)."""
-    usable = total_ram * safe_frac
-    best = None
+    usable_ram = total_ram * safe_frac
+    best: tuple[float, int, int] | None = None
     for t, rt_min in runtime_curve.items():
-        conc = max(int(usable // (mem_per_job * t)), 1)
+        ram_conc = int(usable_ram // (mem_per_job * t)) or 1
+        cpu_conc = cores // t or 1
+        conc = min(ram_conc, cpu_conc)
         tph = conc / rt_min * 60  # jobs/hour at reference speed
         cand = (tph, t, conc)
         if best is None or cand > best:
@@ -100,8 +103,8 @@ def best_thread_count(
         raise RuntimeError(
             "No valid thread count – check mem-per-job or RUNTIME_TABLE."
         )
-    _, tb, cb = best
-    return tb, cb, best[0]
+    tph, tb, cb = best
+    return tb, cb, tph
 
 
 def main():
@@ -145,25 +148,24 @@ def main():
         )
 
     best_t, best_conc, ref_tph = best_thread_count(
-        curve, ram, args.mem_per_job, args.safe_mem
+        curve, ram, args.mem_per_job, args.safe_mem, cores
     )
 
-    # scaling factor k
     if args.freq_scale:
         k = args.freq_scale
-        note = f"user-supplied k={k:.2f}x"
+        note = f"user-supplied k={k:.2f}×"
     else:
         cpu_mhz = detect_cpu_freq_mhz()
         k = cpu_mhz / REFERENCE_CPU_FREQ_MHZ
         note = (
             f"detected CPU max {cpu_mhz:.0f}MHz / "
-            f"{REFERENCE_CPU_FREQ_MHZ:.0f}MHz = {k:.2f}x"
+            f"{REFERENCE_CPU_FREQ_MHZ:.0f}MHz = {k:.2f}×"
         )
 
     tph = ref_tph / k
     if args.subjects > 0:
         secs = args.subjects / tph * 3600
-        h = int(secs // 3600);
+        h = int(secs // 3600)
         m = int((secs % 3600) // 60)
         eta = f"{h} h {m} m"
     else:
