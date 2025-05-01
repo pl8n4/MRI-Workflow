@@ -36,8 +36,8 @@ except ImportError:
 # Reference CPU freq for original benchmark (MHz)
 REFERENCE_CPU_FREQ_MHZ = 2600.0
 
-# Reference runtimes (minutes) for thread counts\RUNTIME_TABLE: 
-Dict[str, Dict[int, float]] = {
+# Reference runtimes (minutes) for thread counts
+RUNTIME_TABLE: Dict[str, Dict[int, float]] = {
     "sswarper": {1: 125.98, 2: 86.935, 3: 74.313, 4: 65.29,
                   8: 50.255, 12: 45.99, 16: 44.35, 24: 43.75, 32: 44.4},
     "afni_proc": {1: 23.802, 2: 20.75, 3: 19.078, 4: 18.954,
