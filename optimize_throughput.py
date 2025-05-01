@@ -6,7 +6,7 @@ current machine resources, and user-supplied RAM needs.
 
 Key features
 ============
-* Auto-detect CPU cores & RAM via psutil.
+* Auto-detect CPU cores & RAM via psutil (physical or logical).
 * Derive speed-scaling factor k by querying actual CPU max frequency.
 * RAM- and CPU-aware: caps concurrency so total RSS and CPU threads never exceed limits.
 * Two-phase batching: computes optimal config for full-size batches and the final remainder batch.
@@ -16,7 +16,7 @@ Usage examples
 --------------
 ```bash
 python optimize_fmri_throughput.py --workflow sswarper \
-       --subjects 100 --mem-per-job 5 --safe-mem 0.9
+       --subjects 100 --mem-per-job 5 --safe-mem 0.9 --logical-cores
 ```
 ```bash
 python optimize_fmri_throughput.py --workflow afni_proc \
@@ -34,7 +34,7 @@ except ImportError:
     raise SystemExit("tabulate not installed. ➜ pip install tabulate")
 
 # Reference CPU freq for original benchmark (MHz)
-REFERENCE_CPU_FREQ_MHZ = 3700.0
+REFERENCE_CPU_FREQ_MHZ = 2600.0
 
 # Reference runtimes (minutes) for thread counts
 RUNTIME_TABLE: Dict[str, Dict[int, float]] = {
@@ -61,9 +61,12 @@ def fraction_float(val: str) -> float:
     return f
 
 
-def detect_hardware() -> Tuple[int, float]:
-    """Return (physical_cores, total_RAM_GB)."""
-    cores = psutil.cpu_count(logical=False) or psutil.cpu_count()
+def detect_hardware(use_logical: bool = False) -> Tuple[int, float]:
+    """Return (cores, total_RAM_GB), using logical or physical cores."""
+    cores = psutil.cpu_count(logical=use_logical)
+    # Fallback if None
+    if cores is None:
+        cores = psutil.cpu_count(logical=not use_logical) or 1
     total_ram = psutil.virtual_memory().total / 1024**3
     return cores, total_ram
 
@@ -135,9 +138,13 @@ def main():
         "--freq-scale", type=positive_float,
         help="Override speed-scaling factor k"
     )
+    parser.add_argument(
+        "--logical-cores", action="store_true", default=False,
+        help="Use logical CPU count (including hyperthreads) instead of physical cores"
+    )
     args = parser.parse_args()
 
-    cores, ram = detect_hardware()
+    cores, ram = detect_hardware(args.logical_cores)
     if args.mem_per_job > ram:
         raise SystemExit(
             f"mem-per-job ({args.mem_per_job} GB) exceeds total RAM {ram:.1f} GB"
@@ -167,7 +174,7 @@ def main():
 
     tph_full = ref_tph_full * k
 
-    print(f"Detected: {cores} physical cores, {ram:.1f} GB RAM")
+    print(f"Detected: {cores} cores, {ram:.1f} GB RAM ({'logical' if args.logical_cores else 'physical'} count)")
     print(f"Workflow: {args.workflow}")
     print(f"RAM limit allows {best_conc_full} jobs (mem-per-job={args.mem_per_job} GB)")
     print(f"Scaling factor k: {note}")
@@ -212,6 +219,7 @@ def main():
             ht = int(t_tot // 3600)
             mt = int((t_tot % 3600) // 60)
             print(f"\nTotal wall-time estimated: {ht} h {mt} m")
+
 
 if __name__ == "__main__":
     main()
