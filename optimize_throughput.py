@@ -1,42 +1,37 @@
 #!/usr/bin/env python3
 """
-optimize_fmri_throughput.py  ▸  Recommend thread-count (cores per subject)
-for AFNI @SSwarper or afni_proc.py based on reference speed-up curves,
-current machine resources, and user-supplied RAM needs.
+optimize_throughput.py ─ Recommend thread‑count (cores per subject)
+for AFNI @SSwarper or afni_proc.py based on reference speed‑up curves,
+current machine resources, and user‑supplied RAM needs.
 
 Key features
 ============
-* Auto-detect logical CPU cores & RAM via psutil.
-* Derive speed-scaling factor k by querying actual CPU max frequency.
-* RAM- and CPU-aware: caps concurrency so total RSS and CPU threads never exceed limits.
-* Two-phase batching: computes optimal config for full-size batches and the final remainder batch.
-* Input validation: ensures mem-per-job > 0 and safe-mem in (0,1].
+* Auto‑detect logical CPU cores & RAM via psutil.
+* Derive speed‑scaling factor k by querying actual CPU max frequency.
+* RAM‑ and CPU‑aware: caps concurrency so total RSS and CPU threads never exceed limits.
+* Two‑phase batching: computes optimal config for full‑size batches and the final remainder batch.
+* Input validation: ensures mem‑per‑job > 0 and safe‑mem in (0,1].
 
 Usage examples
 --------------
 ```bash
-python optimize_fmri_throughput.py --workflow sswarper \
+python optimize_throughput.py --workflow sswarper \
        --subjects 100 --mem-per-job 5 --safe-mem 0.9
 ```
 ```bash
-python optimize_fmri_throughput.py --workflow afni_proc \
+python optimize_throughput.py --workflow afni_proc \
        --subjects 50 --mem-per-job 4 --freq-scale 1.1
 ```
 """
 from __future__ import annotations
+
 import argparse
 from typing import Dict, Tuple
+
 import psutil
+from tabulate import tabulate
 
-try:
-    from tabulate import tabulate
-except ImportError:
-    raise SystemExit("tabulate not installed. ➜ pip install tabulate")
-
-# Reference CPU freq for original benchmark (MHz)
-REFERENCE_CPU_FREQ_MHZ = 3700.0
-
-# Reference runtimes (minutes) for thread counts
+# Reference curve data (threads → minutes per subject at ref speed)
 RUNTIME_TABLE: Dict[str, Dict[int, float]] = {
     "sswarper": {
         1: 125.98, 2: 86.935, 3: 74.313, 4: 65.29,
@@ -47,6 +42,29 @@ RUNTIME_TABLE: Dict[str, Dict[int, float]] = {
         8: 17.614, 12: 17.199, 16: 17.1055, 24: 16.937, 32: 17.129
     },
 }
+
+REFERENCE_CPU_FREQ_MHZ = 3700.0
+
+
+def detect_hardware() -> tuple[int, float]:
+    """Return (logical_cores, total_RAM_GB)."""
+    cores = psutil.cpu_count(logical=True) or 1
+    mem = psutil.virtual_memory().total / (1024 ** 3)
+    return cores, mem
+
+
+def detect_cpu_freq_mhz() -> float:
+    """Try psutil CPU freq; fallback to /proc/cpuinfo average."""
+    try:
+        freq = psutil.cpu_freq()
+        if freq and freq.max and freq.max > 0:
+            return freq.max
+        with open("/proc/cpuinfo") as f:
+            mhzs = [float(line.split(":")[1])
+                    for line in f if "cpu MHz" in line]
+        return sum(mhzs) / len(mhzs)
+    except Exception:
+        return REFERENCE_CPU_FREQ_MHZ
 
 
 def positive_float(val: str) -> float:
@@ -60,29 +78,8 @@ def fraction_float(val: str) -> float:
     f = float(val)
     if not (0.0 < f <= 1.0):
         raise argparse.ArgumentTypeError(
-            f"invalid fraction for safe-mem (must be >0 and ≤1): {val}"
-        )
+            f"invalid fraction for safe-mem (must be >0 and ≤1): {val}")
     return f
-
-
-def detect_hardware() -> Tuple[int, float]:
-    """Return (logical_cores, total_RAM_GB)."""
-    cores = psutil.cpu_count(logical=True) or 1
-    total_ram = psutil.virtual_memory().total / 1024**3
-    return cores, total_ram
-
-
-def detect_cpu_freq_mhz() -> float:
-    """Query CPU max frequency: psutil, fallback to /proc/cpuinfo."""
-    freq = psutil.cpu_freq()
-    if freq and freq.max:
-        return freq.max
-    try:
-        with open('/proc/cpuinfo') as f:
-            mhzs = [float(line.split(':')[1]) for line in f if 'cpu MHz' in line]
-        return sum(mhzs) / len(mhzs)
-    except Exception:
-        return freq.current if freq and freq.current else REFERENCE_CPU_FREQ_MHZ
 
 
 def best_thread_count(
@@ -94,22 +91,19 @@ def best_thread_count(
     max_jobs: int | None = None,
 ) -> Tuple[int, int, float]:
     """Return (best_threads, max_concurrency, jobs_per_h_at_ref_speed)."""
-    usable_ram = total_ram * safe_frac
-    ram_conc = int(usable_ram // mem_per_job) or 1
     best: tuple[float, int, int] | None = None
     for t, rt_min in runtime_curve.items():
+        ram_conc = int(total_ram * safe_frac // mem_per_job) or 1
         cpu_conc = cores // t or 1
         conc = min(ram_conc, cpu_conc)
         if max_jobs is not None:
             conc = min(conc, max_jobs)
-        tph = conc / rt_min * 60
+        tph = conc / rt_min * 60.0
         cand = (tph, t, conc)
         if best is None or cand > best:
             best = cand
     if best is None:
-        raise RuntimeError(
-            "No valid thread count – check mem-per-job or RUNTIME_TABLE."
-        )
+        raise RuntimeError("No valid thread count – check mem-per-job or RUNTIME_TABLE.")
     _, tb, cb = best
     return tb, cb, best[0]
 
@@ -119,44 +113,30 @@ def main():
         description="Recommend optimal cores/subject for AFNI pipelines.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "--workflow", choices=RUNTIME_TABLE,
-        required=True, help="Which curve to use."
-    )
-    parser.add_argument(
-        "--subjects", type=int, default=0,
-        help="# of subjects (0 → skip ETA)"
-    )
-    parser.add_argument(
-        "--mem-per-job", type=positive_float, required=True,
-        help="Peak RAM per job (GB, must be >0)"
-    )
-    parser.add_argument(
-        "--safe-mem", type=fraction_float, default=0.9,
-        help="Fraction of RAM to use (must be >0 and ≤1)"
-    )
-    parser.add_argument(
-        "--freq-scale", type=positive_float,
-        help="Override speed-scaling factor k"
-    )
+    parser.add_argument("--workflow", choices=RUNTIME_TABLE,
+                        required=True, help="Which curve to use.")
+    parser.add_argument("--subjects", type=int, default=0,
+                        help="# of subjects (0 → skip ETA)")
+    parser.add_argument("--mem-per-job", type=positive_float, required=True,
+                        help="Peak RAM per job (GB, must be >0)")
+    parser.add_argument("--safe-mem", type=fraction_float, default=0.9,
+                        help="Fraction of RAM to reserve (0 < safe-mem ≤ 1)")
+    parser.add_argument("--freq-scale", type=positive_float,
+                        help="Explicit CPU-frequency scaling factor k")
     args = parser.parse_args()
 
     cores, ram = detect_hardware()
     if args.mem_per_job > ram:
         raise SystemExit(
-            f"mem-per-job ({args.mem_per_job} GB) exceeds total RAM {ram:.1f} GB"
-        )
+            f"mem-per-job ({args.mem_per_job} GB) exceeds total RAM {ram:.1f} GB")
 
     curve = {t: m for t, m in RUNTIME_TABLE[args.workflow].items() if t <= cores}
     if not curve:
-        raise SystemExit(
-            "No entries ≤ available cores; expand RUNTIME_TABLE or use fewer cores."
-        )
+        raise SystemExit("No entries ≤ available cores; expand RUNTIME_TABLE or use fewer cores.")
 
     # Phase 1: full-size batches
     best_t_full, best_conc_full, ref_tph_full = best_thread_count(
-        curve, ram, args.mem_per_job, args.safe_mem, cores
-    )
+        curve, ram, args.mem_per_job, args.safe_mem, cores)
 
     # Determine scaling factor k
     if args.freq_scale:
@@ -165,9 +145,8 @@ def main():
     else:
         cpu_mhz = detect_cpu_freq_mhz()
         k = cpu_mhz / REFERENCE_CPU_FREQ_MHZ
-        note = (
-            f"detected CPU max {cpu_mhz:.0f}MHz / {REFERENCE_CPU_FREQ_MHZ:.0f}MHz = {k:.2f}×"
-        )
+        note = (f"detected CPU max {cpu_mhz:.0f}MHz / "
+                f"{REFERENCE_CPU_FREQ_MHZ:.0f}MHz = {k:.2f}×")
 
     tph_full = ref_tph_full * k
 
@@ -177,21 +156,36 @@ def main():
 
     print(f"Detected: {cores} logical cores, {ram:.1f} GB RAM")
     print(f"Workflow: {args.workflow}")
-    print(f"Max concurrency: {best_conc_full} jobs (RAM cap={ram_cap_jobs}, CPU cap={cpu_cap_jobs})")
+    print(f"Max concurrency: {best_conc_full} jobs "
+          f"(RAM cap={ram_cap_jobs}, CPU cap={cpu_cap_jobs})")
     print(f"Scaling factor k: {note}")
 
-    # Show full-phase recommendation
+    # Shortcut: if everything fits in one batch, skip 2‑phase logic
+    if args.subjects > 0 and args.subjects <= best_conc_full:
+        total = args.subjects
+        best_t, best_conc, ref_tph = best_thread_count(
+            curve, ram, args.mem_per_job, args.safe_mem, cores, max_jobs=total)
+        tph = ref_tph * k
+
+        print(f"\nOptimal config for {total} subjects:")
+        print(tabulate([[best_t, best_conc, f"{tph:,.1f}"],
+                       ], headers=["thr/job", "jobs", "jobs/h"], tablefmt="plain"))
+        seconds = total / tph * 3600.0
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        print(f"Time for {total} subjects: {h} h {m} m")
+        return
+
+    # Full-batch recommendation
     print("\nPhase 1: full batches optimal config:")
-    print(tabulate(
-        [[best_t_full, best_conc_full, f"{tph_full:,.1f}"]],
-        headers=["thr/job","jobs","jobs/h"], tablefmt="plain"
-    ))
+    print(tabulate([[best_t_full, best_conc_full, f"{tph_full:,.1f}"],
+                   ], headers=["thr/job", "jobs", "jobs/h"], tablefmt="plain"))
 
     if args.subjects > 0:
         total = args.subjects
         full_batches = total // best_conc_full
         full_jobs = full_batches * best_conc_full
-        t1 = full_jobs / tph_full * 3600
+        t1 = full_jobs / tph_full * 3600.0
         h1 = int(t1 // 3600)
         m1 = int((t1 % 3600) // 60)
         R = total - full_jobs
@@ -199,26 +193,22 @@ def main():
         print(f"Time for {full_jobs} subjects: {h1} h {m1} m")
 
         if R > 0:
-            # Phase 2: remainder batch
-            best_t_rem, best_conc_rem, ref_tph_rem = best_thread_count(
-                curve, ram, args.mem_per_job, args.safe_mem, cores, max_jobs=R
-            )
-            tph_rem = ref_tph_rem * k
-            t2 = R / tph_rem * 3600
+            # Remainder batch
+            best_t_r, best_conc_r, ref_tph_r = best_thread_count(
+                curve, ram, args.mem_per_job, args.safe_mem, cores, max_jobs=R)
+            tph_r = ref_tph_r * k
+            t2 = R / tph_r * 3600.0
             h2 = int(t2 // 3600)
             m2 = int((t2 % 3600) // 60)
 
             print("\nPhase 2: remainder batch optimal config:")
-            print(tabulate(
-                [[best_t_rem, best_conc_rem, f"{tph_rem:,.1f}"]],
-                headers=["thr/job","jobs","jobs/h"], tablefmt="plain"
-            ))
+            print(tabulate([[best_t_r, best_conc_r, f"{tph_r:,.1f}"],
+                           ], headers=["thr/job", "jobs", "jobs/h"], tablefmt="plain"))
             print(f"Time for {R} subjects: {h2} h {m2} m")
 
-            # Total ETA
-            t_tot = t1 + t2
-            ht = int(t_tot // 3600)
-            mt = int((t_tot % 3600) // 60)
+            t_total = t1 + t2
+            ht = int(t_total // 3600)
+            mt = int((t_total % 3600) // 60)
             print(f"\nTotal wall-time estimated: {ht} h {mt} m")
 
 
