@@ -7,7 +7,7 @@ current machine resources, and user‑supplied RAM needs.
 Key features
 ============
 * Auto‑detect logical CPU cores & RAM via psutil.
-* Derive speed‑scaling factor k by querying actual CPU max frequency.
+* Derive speed‑scaling factor k by querying advertised CPU max frequency.
 * RAM‑ and CPU‑aware: caps concurrency so total RSS and CPU threads never exceed limits.
 * Two-phase batching: computes optimal config for full-size batches and the final remainder batch.
 * Shortcut logic for highly-core-loaded, few‑subject runs: ideal threads = cores/subjects (capped) with interpolation.
@@ -27,7 +27,7 @@ python optimize_throughput.py --workflow afni_proc \
 from __future__ import annotations
 import argparse
 from typing import Dict, Tuple
-
+import glob
 import psutil
 from tabulate import tabulate
 
@@ -55,16 +55,45 @@ def detect_hardware() -> tuple[int, float]:
 
 
 def detect_cpu_freq_mhz() -> float:
-    """Try psutil CPU freq, fallback to /proc/cpuinfo average."""
+    """
+    Return the advertised maximum CPU frequency in MHz.
+    Attempts in order:
+      1) psutil.cpu_freq().max
+      2) sysfs cpuinfo_max_freq (/sys/devices/system/cpu/*)
+      3) fall back to current /proc/cpuinfo average
+      4) default REFERENCE_CPU_FREQ_MHZ
+    """
+    # 1) psutil max
     try:
         freq = psutil.cpu_freq()
         if freq and freq.max and freq.max > 0:
             return freq.max
+    except Exception:
+        pass
+    # 2) sysfs advertised max
+    try:
+        paths = glob.glob("/sys/devices/system/cpu/cpu[0-9]*/cpufreq/cpuinfo_max_freq")
+        if paths:
+            mhz_vals = []
+            for p in paths:
+                with open(p) as f:
+                    # value in kHz
+                    khz = float(f.read().strip())
+                    mhz_vals.append(khz / 1000.0)
+            if mhz_vals:
+                return sum(mhz_vals) / len(mhz_vals)
+    except Exception:
+        pass
+    # 3) /proc/cpuinfo current
+    try:
         with open('/proc/cpuinfo') as f:
             mhzs = [float(line.split(':')[1]) for line in f if 'cpu MHz' in line]
-        return sum(mhzs) / len(mhzs)
+        if mhzs:
+            return sum(mhzs) / len(mhzs)
     except Exception:
-        return REFERENCE_CPU_FREQ_MHZ
+        pass
+    # 4) default
+    return REFERENCE_CPU_FREQ_MHZ
 
 
 def positive_float(val: str) -> float:
@@ -81,7 +110,6 @@ def fraction_float(val: str) -> float:
             f"invalid fraction for safe-mem (must be >0 and ≤1): {val}"
         )
     return f
-
 
 def best_thread_count(
     runtime_curve: Dict[int, float],
