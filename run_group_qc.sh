@@ -42,17 +42,20 @@ head -n1 /tmp/qctmp | tr '\t' '\n'
 
 
 # ---------- locate column indices we care about ----------
-IFS=$'\t' read -r -a HEADERS < "${RAW_TABLE}"
+IFS=$'\t' read -r -a HDR <<< "$(head -n1 "${RAW_TABLE}")"
 declare -A COL
-for i in "${!HEADERS[@]}"; do
-    case "${HEADERS[$i]}" in
-        out.cen_fr)      COL[CF]=$i ;;
-        out.enorm_max)   COL[MM]=$i ;;
-        tsnr.median|tsnr_median|tsnr.avg|tsnr_average) COL[TS]=$i ;;
-    esac
+for i in "${!HDR[@]}"; do
+  h=$(printf '%s' "${HDR[$i]}" | tr '[:upper:]' '[:lower:]')
+  [[ $h == *"fraction censored per run"* ]] && COL[CF]=$i
+  [[ $h == *"max motion displacement"* ]]    && COL[MM]=$i
+  [[ $h == *"tsnr average"* ]]                && COL[TS]=$i
 done
-[[ -z ${COL[CF]:-} || -z ${COL[MM]:-} ]] && { echo "Required columns not found in AFNI table."; exit 1; }
 
+if [[ -z ${COL[CF]:-} || -z ${COL[MM]:-} ]]; then
+  echo "ERROR: couldn’t find censor or motion columns in AFNI table:"
+  printf '  %s\n' "${HDR[@]}"
+  exit 1
+fi
 # ---------- helper: find JSON & pull variance‑line metrics ----------
 jq_first () {               # $1=json  $2.. jq paths
     local f=$1; shift
