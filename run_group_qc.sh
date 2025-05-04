@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
 #  run_group_qc.sh
-#  --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 #  • Auto‑discovers AFNI out.ss_review.*.txt files
 #  • Builds a raw group QC table with gen_ss_review_table.py
 #  • Cleans the table, extracts key metrics + variance‑line info
@@ -67,6 +67,12 @@ for line in "${LINES[@]}"; do
   IFS=$'\t' read -r -a ROW <<< "$line"
   # Extract subject ID directly from the first column
   SID="${ROW[0]}"
+  # If SID directory doesn't exist, try adding 'sub-' prefix
+  if [[ ! -d "${DERIV_AFNI}/${SID}" ]]; then
+    if [[ -d "${DERIV_AFNI}/sub-${SID}" ]]; then
+      SID="sub-${SID}"
+    fi
+  fi
 
   CF="${ROW[${COL[CF]}]}"
   MM="${ROW[${COL[MM]}]}"
