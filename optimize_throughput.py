@@ -44,7 +44,8 @@ RUNTIME_TABLE: Dict[str, Dict[int, float]] = {
 }
 
 REFERENCE_CPU_FREQ_MHZ = 3700.0
-CAP_THREADS = 24  # maximum threads/job cap for ideal logic
+# maximum threads/job cap for ideal logic, 24 because performance plateaus at 16-24 threads/job
+CAP_THREADS = 24
 
 
 def detect_hardware() -> tuple[int, float]:

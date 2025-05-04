@@ -128,7 +128,8 @@ afni_proc.py \
   -regress_basis         'BLOCK(20,1)' \
   -regress_opts_3dD      -jobs "${NCORES}" -gltsym 'SYM: food -nonfood' -glt_label 1 F-NF \
   -regress_motion_per_run \
-  -regress_censor_motion 0.3 \
+  -regress_apply_mot_types demean deriv \
+  -regress_censor_motion 0.2 \
   -regress_censor_outliers 0.05 \
   -regress_3dD_stop \
   -regress_reml_exec \
