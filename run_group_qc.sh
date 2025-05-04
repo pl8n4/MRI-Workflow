@@ -25,10 +25,7 @@ VE_SEV_FAIL="${VE_SEV_FAIL:-high}"       # severity that forces review
 
 echo "=== [discover] searching for out.ss_review files ..."
 mapfile -t SS_FILES < <(
-  find "${DERIV_AFNI}" \
-       -mindepth 2 -maxdepth 2 \
-       -type f -name 'out.ss_review.*.txt' \
-       | sort
+  find "${DERIV_AFNI}" -mindepth 2 -maxdepth 2 -type f -name 'out.ss_review.*.txt' | sort
 )
 if [[ ${#SS_FILES[@]} -eq 0 ]]; then
   echo "No out.ss_review.*.txt files found — nothing to summarise."
@@ -36,65 +33,48 @@ if [[ ${#SS_FILES[@]} -eq 0 ]]; then
 fi
 
 echo "=== [afni] running gen_ss_review_table.py ..."
-gen_ss_review_table.py \
-  -overwrite \
-  -tablefile "${RAW_TABLE}" \
-  -infiles "${SS_FILES[@]}"
+gen_ss_review_table.py -overwrite -tablefile "${RAW_TABLE}" -infiles "${SS_FILES[@]}"
 
 # — locate column indices robustly —
 mapfile -t HDR < <(head -n1 "${RAW_TABLE}" | tr '\t' '\n')
 declare -A COL
 for i in "${!HDR[@]}"; do
   h="${HDR[i],,}"
-  [[ -z ${COL[CF]:-} && ( "$h" == *fraction*per*run* || "$h" == *censor*fraction* ) ]] && COL[CF]=$i
-  [[ -z ${COL[MM]:-} && ( "$h" == *max*motion*displacement* || "$h" == *max*censored*displacement* ) ]] && COL[MM]=$i
-  [[ -z ${COL[TS]:-} && "$h" == *tsnr* ]] && COL[TS]=$i
+  [[ -z ${COL[CF]:-} && ( $h == *fraction*per*run* || $h == *censor*fraction* ) ]] && COL[CF]=$i
+  [[ -z ${COL[MM]:-} && ( $h == *max*motion*displacement* || $h == *max*censored*displacement* ) ]] && COL[MM]=$i
+  [[ -z ${COL[TS]:-} && $h == *tsnr* ]] && COL[TS]=$i
 done
 
 if [[ -z ${COL[CF]:-} || -z ${COL[MM]:-} ]]; then
   echo "ERROR: couldn’t find censor or motion columns. Found headers:"
-  printf '  %s
-' "${HDR[@]}"
+  printf '  %s\n' "${HDR[@]}"
   exit 1
 fi
 
-echo -e "subject	censor_frac	motion_max	TSNR	ve_count	ve_severity" > "${GROUP_TSV}"
+echo -e "subject\tcensor_frac\tmotion_max\tTSNR\tve_count\tve_severity" > "${GROUP_TSV}"
 FAILED_SUBS=()
 
 # skip header + units (first two lines), then process each subject row
 readarray -t LINES < <(tail -n +3 "${RAW_TABLE}")
 for line in "${LINES[@]}"; do
   IFS=$'\t' read -r -a ROW <<< "$line"
-  # Extract subject ID directly from the first column
-  SID="${ROW[0]}"
-  # If SID directory doesn't exist, try adding 'sub-' prefix
-  if [[ ! -d "${DERIV_AFNI}/${SID}" ]]; then
-    if [[ -d "${DERIV_AFNI}/sub-${SID}" ]]; then
-      SID="sub-${SID}"
-    fi
-  fi
+  SID="${ROW[0]}"                               # subject ID column
+  [[ -d "${DERIV_AFNI}/sub-${SID}" && ! -d "${DERIV_AFNI}/${SID}" ]] && SID="sub-${SID}"
 
   CF="${ROW[${COL[CF]}]}"
   MM="${ROW[${COL[MM]}]}"
-  TS="NA"
-  [[ -n ${COL[TS]:-} ]] && TS="${ROW[${COL[TS]}]}"
+  TS="${COL[TS]:+${ROW[${COL[TS]}]}}"
+  TS="${TS:-NA}"
 
-    # optional variance‑line info from JSON
+  # ---------------- variance‑line metrics ----------------
+  VC=0; VS=none
   qc_json=$(find "${DERIV_AFNI}/${SID}" -maxdepth 2 -type f -name 'apqc_*.json' | head -n1 || true)
   if [[ -n $qc_json ]]; then
-    # try every known location/key for variance‑line metrics
-    VC=$(jq -re '.qc_02_vstat.ve_total   // .qc_metrics.ve_total // .ve_total // .qc_ve_total // .ve_tot // empty' "$qc_json" 2>/dev/null || true)
-    VS=$(jq -re '.qc_02_vstat.ve_severity // .qc_metrics.ve_severity // .ve_severity // .qc_overall    // empty'             "$qc_json" 2>/dev/null || true)
-  fi
-  VC=${VC:-0}
-  VS=${VS:-none}
-             "$qc_json" 2>/dev/null || echo unknown)
-  else
-    VC=0
-    VS=unknown
+    VC=$(jq -re '.qc_02_vstat.ve_total   // .qc_metrics.ve_total   // .ve_total   // .qc_ve_total   // .ve_tot   // 0' "$qc_json" 2>/dev/null)
+    VS=$(jq -re '.qc_02_vstat.ve_severity // .qc_metrics.ve_severity // .ve_severity // .qc_overall    // "none"' "$qc_json" 2>/dev/null)
   fi
 
-  echo -e "${SID}	${CF}	${MM}	${TS}	${VC}	${VS}" >> "${GROUP_TSV}"
+  echo -e "${SID}\t${CF}\t${MM}\t${TS}\t${VC}\t${VS}" >> "${GROUP_TSV}"
 
   fail=0
   (( $(echo "$CF > $CENSOR_THRESH" | bc -l) )) && fail=1
@@ -107,11 +87,9 @@ if [[ ${#FAILED_SUBS[@]} -eq 0 ]]; then
   rm -f "${FAILED_TXT}"
   echo "=== [result] ✅ All subjects passed QC thresholds."
 else
-  printf "%s
-" "${FAILED_SUBS[@]}" > "${FAILED_TXT}"
+  printf '%s\n' "${FAILED_SUBS[@]}" > "${FAILED_TXT}"
   echo "=== [result] ⚠️  ${#FAILED_SUBS[@]} subject(s) flagged:"
-  printf '    %s
-' "${FAILED_SUBS[@]}"
+  printf '    %s\n' "${FAILED_SUBS[@]}"
   echo "Failed list saved to ${FAILED_TXT}"
 fi
 
