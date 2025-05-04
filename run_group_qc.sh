@@ -25,7 +25,11 @@ VE_COUNT_THRESH="${VE_COUNT_THRESH:-5}"  # ≥5 variance lines
 VE_SEV_FAIL="${VE_SEV_FAIL:-high}"       # severity flag that forces fail
 
 echo "=== [discover] searching for out.ss_review files ..."
-mapfile -t SS_FILES < <(find "${DERIV_AFNI}" -type f -name 'out.ss_review.*' | sort)
+mapfile -t SS_FILES < <(find "${DERIV_AFNI}" \
+                         -mindepth 2 -maxdepth 2 \
+                         -type f -name 'out.ss_review.*.txt' \
+                         | sort)
+                        
 if [[ ${#SS_FILES[@]} -eq 0 ]]; then
     echo "No out.ss_review.* files found — nothing to summarise."
     exit 0
