@@ -37,7 +37,8 @@ fi
 
 # ---------- build raw table with AFNI's helper ----------
 echo "=== [afni] running gen_ss_review_table.py ..."
-gen_ss_review_table.py -overwrite -tablefile "${RAW_TABLE}" -infiles "${SS_FILES[@]}"
+gen_ss_review_table.py -overwrite -tablefile /tmp/qctmp -infiles "${SS_FILES[@]}"
+head -n1 /tmp/qctmp | tr '\t' '\n'
 
 
 # ---------- locate column indices we care about ----------
