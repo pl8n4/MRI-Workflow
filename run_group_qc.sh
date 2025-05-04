@@ -2,10 +2,10 @@
 # ---------------------------------------------------------------------------
 #  run_group_qc.sh
 #  --------------------------------------------------------------------------
-#  • Auto‑discovers all AFNI out.ss_review.*.txt files in derivatives/afni_proc/
-#  • Builds a raw group QC table with AFNI’s gen_ss_review_table.py
-#  • Cleans the table, extracts key metrics + variance‑line info
-#  • Applies pass/fail rules and lists failing subjects
+#  • Auto‑discovers AFNI out.ss_review.*.txt files
+#  • Builds a raw group QC table with gen_ss_review_table.py (with -show_infiles)
+#  • Extracts key metrics + variance‑line info
+#  • Applies pass/fail rules and writes failed_subjects.txt
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -19,9 +19,9 @@ FAILED_TXT="${QC_UTILS}/failed_subjects.txt"
 RAW_TABLE="$(mktemp)"
 
 # user‑tunable thresholds (env‑var overrides)
-CENSOR_THRESH="${CENSOR_THRESH:-0.10}"   # >10 % censored TRs
-VE_COUNT_THRESH="${VE_COUNT_THRESH:-5}"  # ≥5 variance‑line count
-VE_SEV_FAIL="${VE_SEV_FAIL:-high}"       # severity that forces review
+CENSOR_THRESH="${CENSOR_THRESH:-0.10}"   # >10 % censored
+VE_COUNT_THRESH="${VE_COUNT_THRESH:-5}"  # ≥5 variance lines
+VE_SEV_FAIL="${VE_SEV_FAIL:-high}"       # severity that forces fail
 
 echo "=== [discover] searching for out.ss_review files ..."
 mapfile -t SS_FILES < <(
@@ -33,25 +33,23 @@ if [[ ${#SS_FILES[@]} -eq 0 ]]; then
 fi
 
 echo "=== [afni] running gen_ss_review_table.py ..."
-gen_ss_review_table.py -overwrite -tablefile "${RAW_TABLE}" -infiles "${SS_FILES[@]}"
+gen_ss_review_table.py \
+  -overwrite \
+  -tablefile "${RAW_TABLE}" \
+  -show_infiles \
+  -infiles "${SS_FILES[@]}"
 
 # — locate column indices robustly —
 mapfile -t HDR < <(head -n1 "${RAW_TABLE}" | tr '\t' '\n')
 declare -A COL
 for i in "${!HDR[@]}"; do
-  h_lc="${HDR[i],,}"
-  if [[ -z ${COL[CF]:-} && ( "$h_lc" == *fraction*per*run* || "$h_lc" == *censor*fraction* ) ]]; then
-    COL[CF]=$i
-  fi
-  if [[ -z ${COL[MM]:-} && ( "$h_lc" == *max*motion*displacement* || "$h_lc" == *max*censored*displacement* ) ]]; then
-    COL[MM]=$i
-  fi
-  if [[ -z ${COL[TS]:-} && "$h_lc" == *tsnr* ]]; then
-    COL[TS]=$i
-  fi
+  h="${HDR[i],,}"
+  [[ -z ${COL[CF]:-} && ( "$h" == *fraction*per*run* || "$h" == *censor*fraction* ) ]] && COL[CF]=$i
+  [[ -z ${COL[MM]:-} && ( "$h" == *max*motion*displacement* || "$h" == *max*censored*displacement* ) ]] && COL[MM]=$i
+  [[ -z ${COL[TS]:-} && "$h" == *tsnr* ]] && COL[TS]=$i
 done
 if [[ -z ${COL[CF]:-} || -z ${COL[MM]:-} ]]; then
-  echo "ERROR: couldn’t find censor or motion columns in AFNI table. Found these headers:"
+  echo "ERROR: couldn’t find censor or motion columns. Found headers:"
   printf '  %s\n' "${HDR[@]}"
   exit 1
 fi
@@ -59,23 +57,23 @@ fi
 echo -e "subject\tcensor_frac\tmotion_max\tTSNR\tve_count\tve_severity" > "${GROUP_TSV}"
 FAILED_SUBS=()
 
-readarray -t LINES < <(tail -n +2 "${RAW_TABLE}")
-for line in "${LINES[@]}"; do
-  IFS=$'\t' read -r -a ROW <<< "$line"
-  SID="${ROW[0]}"
+tail -n +2 "${RAW_TABLE}" | while IFS=$'\t' read -r -a ROW; do
+  INFILE="${ROW[0]}"                             # full path to .txt
+  SID="$(basename "$(dirname "$INFILE")")"       # e.g. sub-08
+
   CF="${ROW[${COL[CF]}]}"
   MM="${ROW[${COL[MM]}]}"
   TS="NA"
   [[ -n ${COL[TS]:-} ]] && TS="${ROW[${COL[TS]}]}"
 
-  # optional variance-line info from apqc JSON
+  # optional variance-line info from JSON
   qc_json=$(find "${DERIV_AFNI}/${SID}" -maxdepth 2 -type f -name 'apqc_*.json' | head -n1 || true)
   if [[ -n $qc_json ]]; then
-    VC=$(jq -re '.qc_metrics.ve_total // .ve_total // .qc_ve_total // .ve_tot' "$qc_json" 2>/dev/null || echo "")
-    VS=$(jq -re '.qc_metrics.ve_severity // .ve_severity // .qc_overall // .qc_metrics."ve_overall"' "$qc_json" 2>/dev/null || echo "")
+    VC=$(jq -re '.qc_metrics.ve_total // .ve_total // .qc_ve_total // .ve_tot' "$qc_json" 2>/dev/null || echo 0)
+    VS=$(jq -re '.qc_metrics.ve_severity // .ve_severity // .qc_overall' "$qc_json" 2>/dev/null || echo unknown)
+  else
+    VC=0; VS=unknown
   fi
-  VC=${VC:-0}
-  VS=${VS:-unknown}
 
   echo -e "${SID}\t${CF}\t${MM}\t${TS}\t${VC}\t${VS}" >> "${GROUP_TSV}"
 
