@@ -46,15 +46,9 @@ mapfile -t HDR < <(head -n1 "${RAW_TABLE}" | tr '\t' '\n')
 declare -A COL
 for i in "${!HDR[@]}"; do
   h="${HDR[i],,}"
-  if [[ -z ${COL[CF]:-} && ( "$h" == *fraction*per*run* || "$h" == *censor*fraction* ) ]]; then
-    COL[CF]=$i
-  fi
-  if [[ -z ${COL[MM]:-} && ( "$h" == *max*motion*displacement* || "$h" == *max*censored*displacement* ) ]]; then
-    COL[MM]=$i
-  fi
-  if [[ -z ${COL[TS]:-} && "$h" == *tsnr* ]]; then
-    COL[TS]=$i
-  fi
+  [[ -z ${COL[CF]:-} && ( "$h" == *fraction*per*run* || "$h" == *censor*fraction* ) ]] && COL[CF]=$i
+  [[ -z ${COL[MM]:-} && ( "$h" == *max*motion*displacement* || "$h" == *max*censored*displacement* ) ]] && COL[MM]=$i
+  [[ -z ${COL[TS]:-} && "$h" == *tsnr* ]] && COL[TS]=$i
 done
 
 if [[ -z ${COL[CF]:-} || -z ${COL[MM]:-} ]]; then
@@ -71,8 +65,8 @@ FAILED_SUBS=()
 readarray -t LINES < <(tail -n +3 "${RAW_TABLE}")
 for line in "${LINES[@]}"; do
   IFS=$'\t' read -r -a ROW <<< "$line"
-  INFILE="${ROW[0]}"
-  SID="$(basename "$(dirname "$INFILE")")"
+  # Extract subject ID directly from the first column
+  SID="${ROW[0]}"
 
   CF="${ROW[${COL[CF]}]}"
   MM="${ROW[${COL[MM]}]}"
