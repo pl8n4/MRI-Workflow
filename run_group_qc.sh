@@ -38,17 +38,29 @@ fi
 # ---------- build raw table with AFNI's helper ----------
 echo "=== [afni] running gen_ss_review_table.py ..."
 gen_ss_review_table.py -overwrite -tablefile /tmp/qctmp -infiles "${SS_FILES[@]}"
-head -n1 /tmp/qctmp | tr '\t' '\n'
 
 
 # ---------- locate column indices we care about ----------
 IFS=$'\t' read -r -a HDR <<< "$(head -n1 "${RAW_TABLE}")"
 declare -A COL
+
 for i in "${!HDR[@]}"; do
-  h=$(printf '%s' "${HDR[$i]}" | tr '[:upper:]' '[:lower:]')
-  [[ $h == *"fraction censored per run"* ]] && COL[CF]=$i
-  [[ $h == *"max motion displacement"* ]]    && COL[MM]=$i
-  [[ $h == *"tsnr average"* ]]                && COL[TS]=$i
+  h_lc=$(printf '%s' "${HDR[$i]}" | tr '[:upper:]' '[:lower:]')
+
+  # catch either "fraction censored per run" OR "censor fraction"
+  if [[ -z ${COL[CF]:-} && ( $h_lc == *"fraction censored per run"* || $h_lc == *"censor fraction"* ) ]]; then
+    COL[CF]=$i
+  fi
+
+  # catch either "max motion displacement" OR "max censored displacement"
+  if [[ -z ${COL[MM]:-} && ( $h_lc == *"max motion displacement"* || $h_lc == *"max censored displacement"* ) ]]; then
+    COL[MM]=$i
+  fi
+
+  # any TSNR column name
+  if [[ -z ${COL[TS]:-} && $h_lc == *"tsnr"* ]]; then
+    COL[TS]=$i
+  fi
 done
 
 if [[ -z ${COL[CF]:-} || -z ${COL[MM]:-} ]]; then
