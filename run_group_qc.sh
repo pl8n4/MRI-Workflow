@@ -79,12 +79,15 @@ for line in "${LINES[@]}"; do
   TS="NA"
   [[ -n ${COL[TS]:-} ]] && TS="${ROW[${COL[TS]}]}"
 
-  # optional variance‑line info from JSON
+    # optional variance‑line info from JSON
   qc_json=$(find "${DERIV_AFNI}/${SID}" -maxdepth 2 -type f -name 'apqc_*.json' | head -n1 || true)
   if [[ -n $qc_json ]]; then
-    VC=$(jq -re '.qc_metrics.ve_total // .ve_total // .qc_ve_total // .ve_tot' \
-             "$qc_json" 2>/dev/null || echo 0)
-    VS=$(jq -re '.qc_metrics.ve_severity // .ve_severity // .qc_overall' \
+    # try every known location/key for variance‑line metrics
+    VC=$(jq -re '.qc_02_vstat.ve_total   // .qc_metrics.ve_total // .ve_total // .qc_ve_total // .ve_tot // empty' "$qc_json" 2>/dev/null || true)
+    VS=$(jq -re '.qc_02_vstat.ve_severity // .qc_metrics.ve_severity // .ve_severity // .qc_overall    // empty'             "$qc_json" 2>/dev/null || true)
+  fi
+  VC=${VC:-0}
+  VS=${VS:-none}
              "$qc_json" 2>/dev/null || echo unknown)
   else
     VC=0
