@@ -37,7 +37,8 @@ fi
 
 # ---------- build raw table with AFNI's helper ----------
 echo "=== [afni] running gen_ss_review_table.py ..."
-gen_ss_review_table.py -tablefile "${RAW_TABLE}" -infiles "${SS_FILES[@]}"
+gen_ss_review_table.py -overwrite -tablefile "${RAW_TABLE}" -infiles "${SS_FILES[@]}"
+
 
 # ---------- locate column indices we care about ----------
 IFS=$'\t' read -r -a HEADERS < "${RAW_TABLE}"
