@@ -15,10 +15,15 @@ TARBALL="${QC_UTILS}/QC_flagged_${timestamp}.tgz"
 echo "=== [package] creating ${TARBALL} ..."
 mapfile -t BAD_SUBS < "${FAILED_TXT}"
 REL_PATHS=()
+
 for SID in "${BAD_SUBS[@]}"; do
-    path="${SID}/QC_${SID}"
-    [[ -d "${DERIV_AFNI}/${path}" ]] && REL_PATHS+=("${path}") \
-        || echo "[warn] missing QC dir for ${SID}"
+    subj_dir="${DERIV_AFNI}/${SID}"
+    qc_dir=$(find "$subj_dir" -maxdepth 1 -type d -name 'QC_*' | head -n1 || true)
+    if [[ -n $qc_dir ]]; then
+        REL_PATHS+=("${qc_dir#${DERIV_AFNI}/}")
+    else
+        echo "[warn] missing QC dir for ${SID}"
+    fi
 done
 
 [[ ${#REL_PATHS[@]} -eq 0 ]] && { echo "No QC dirs found to package."; exit 0; }
