@@ -1,66 +1,87 @@
 #!/usr/bin/env bash
-# Aggregate AFNI QC across subjects and flag failures.
-# Put this file in the dataset root (same dir as afni_proc.sh).
+# ---------------------------------------------------------------------------
+#  run_group_qc.sh
+#  --------------------------------------------------------------------------
+#  • Auto‑discovers all AFNI out.ss_review.* files in derivatives/afni_proc/
+#  • Builds a raw group QC table with AFNI's own gen_ss_review_table.py
+#  • Extracts key metrics + variance‑line info, writes cleaned group_qc.tsv
+#  • Applies user‑tunable pass/fail rules and lists failing subjects
+# ---------------------------------------------------------------------------
 set -euo pipefail
 
+# ---------- paths ----------
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DERIV_AFNI="${ROOT_DIR}/derivatives/afni_proc"
 QC_UTILS="${ROOT_DIR}/derivatives/qc_utils"
-
 mkdir -p "${QC_UTILS}"
 
 GROUP_TSV="${QC_UTILS}/group_qc.tsv"
 FAILED_TXT="${QC_UTILS}/failed_subjects.txt"
+RAW_TABLE="$(mktemp)"
 
-# -------- thresholds --------
+# ---------- thresholds (env‑var overrides) ----------
 CENSOR_THRESH="${CENSOR_THRESH:-0.10}"   # >10 % censored TRs
-VE_COUNT_THRESH="${VE_COUNT_THRESH:-5}"  # ≥5 variance‑lines
-VE_SEV_FAIL="${VE_SEV_FAIL:-high}"       # severity level that forces fail
+VE_COUNT_THRESH="${VE_COUNT_THRESH:-5}"  # ≥5 variance lines
+VE_SEV_FAIL="${VE_SEV_FAIL:-high}"       # severity flag that forces fail
 
-echo "=== [discover] searching for completed subjects ..."
-mapfile -t SUB_DIRS < <(find "${DERIV_AFNI}" -maxdepth 1 -type d -name 'sub-*' | sort)
-[[ ${#SUB_DIRS[@]} -eq 0 ]] && { echo "No subject dirs found."; exit 0; }
+echo "=== [discover] searching for out.ss_review files ..."
+mapfile -t SS_FILES < <(find "${DERIV_AFNI}" -type f -name 'out.ss_review.*' | sort)
+if [[ ${#SS_FILES[@]} -eq 0 ]]; then
+    echo "No out.ss_review.* files found — nothing to summarise."
+    exit 0
+fi
 
-# -------- helpers --------
-jq_first () {        # $1=json file, $2.. jq keys
+# ---------- build raw table with AFNI's helper ----------
+echo "=== [afni] running gen_ss_review_table.py ..."
+gen_ss_review_table.py -tablefile "${RAW_TABLE}" "${SS_FILES[@]}"
+
+# ---------- locate column indices we care about ----------
+IFS=$'\t' read -r -a HEADERS < "${RAW_TABLE}"
+declare -A COL
+for i in "${!HEADERS[@]}"; do
+    case "${HEADERS[$i]}" in
+        out.cen_fr)      COL[CF]=$i ;;
+        out.enorm_max)   COL[MM]=$i ;;
+        tsnr.median|tsnr_median|tsnr.avg|tsnr_average) COL[TS]=$i ;;
+    esac
+done
+[[ -z ${COL[CF]:-} || -z ${COL[MM]:-} ]] && { echo "Required columns not found in AFNI table."; exit 1; }
+
+# ---------- helper: find JSON & pull variance‑line metrics ----------
+jq_first () {               # $1=json  $2.. jq paths
     local f=$1; shift
-    local q val
+    local q v
     for q in "$@"; do
-        val=$(jq -re "$q // empty" "$f" 2>/dev/null || true)
-        [[ -n $val ]] && { echo "$val"; return; }
+        v=$(jq -re "$q // empty" "$f" 2>/dev/null || true)
+        [[ -n $v ]] && { echo "$v"; return; }
     done
-    echo "NA"
+    echo ""
+}
+find_qc_json () {           # $1=subj_dir
+    find "$1" -maxdepth 2 -type f -name 'apqc_*.json' | head -n1 || true
 }
 
-find_qc_json () {    # $1 = subject dir → echo full path to apqc_*.json or blank
-    local subj_dir=$1
-    local qc_dir
-    qc_dir=$(find "$subj_dir" -maxdepth 1 -type d -name 'QC_*' | head -n1 || true)
-    [[ -z $qc_dir ]] && return
-    find "$qc_dir" -maxdepth 1 -type f -name 'apqc_*.json' | head -n1
-}
-
-# -------- header --------
+# ---------- write cleaned table & decide pass/fail ----------
 echo -e "subject\tcensor_frac\tmotion_max\tTSNR\tve_count\tve_severity" > "${GROUP_TSV}"
 FAILED_SUBS=()
 
-# -------- per‑subject loop --------
-for S in "${SUB_DIRS[@]}"; do
-    SID=$(basename "$S")                       # sub‑08
-    QC_JSON=$(find_qc_json "$S")
-    [[ -z $QC_JSON ]] && { echo "[skip] $SID (no QC JSON)"; continue; }
+tail -n +2 "${RAW_TABLE}" | while IFS=$'\t' read -r -a ROW; do
+    SID="${ROW[0]}"                # sub‑XX
 
-    CF=$(jq_first "$QC_JSON" '.qc_metrics.censor_fraction' '.qc_metrics.censor_frac' '.censor_fraction')
-    MM=$(jq_first "$QC_JSON" '.qc_metrics.motion_enorm_max' '.qc_metrics.enorm_max' '.motion_enorm_max')
-    TS=$(jq_first "$QC_JSON" '.qc_metrics.tsnr_median' '.qc_metrics.tsnr' '.tsnr')
-    VC=$(jq_first "$QC_JSON" '.qc_metrics.ve_total' '.qc_ve_total' '.ve_tot')
-    VS=$(jq_first "$QC_JSON" '.qc_metrics.ve_severity' '.ve_overall' '.ve_severity')
+    CF="${ROW[${COL[CF]}]}"
+    MM="${ROW[${COL[MM]}]}"
+    TS="NA"
+    [[ -n ${COL[TS]:-} ]] && TS="${ROW[${COL[TS]}]}"
 
-    [[ $CF == NA ]] && CF=0
-    [[ $MM == NA ]] && MM=0
-    [[ $TS == NA ]] && TS=0
-    [[ $VC == NA ]] && VC=0
-    [[ $VS == NA ]] && VS="unknown"
+    # variance‑line info (optional)
+    subj_dir="${DERIV_AFNI}/${SID}"
+    qc_json=$(find_qc_json "$subj_dir")
+    if [[ -n $qc_json ]]; then
+        VC=$(jq_first "$qc_json" '.ve_total' '.qc_metrics.ve_total' '.qc_ve_total')
+        VS=$(jq_first "$qc_json" '.ve_severity' '.qc_metrics.ve_severity' '.ve_overall')
+    fi
+    VC=${VC:-0}
+    VS=${VS:-unknown}
 
     echo -e "${SID}\t${CF}\t${MM}\t${TS}\t${VC}\t${VS}" >> "${GROUP_TSV}"
 
@@ -71,7 +92,7 @@ for S in "${SUB_DIRS[@]}"; do
     (( fail )) && FAILED_SUBS+=("$SID")
 done
 
-# -------- results --------
+# ---------- report ----------
 if [[ ${#FAILED_SUBS[@]} -eq 0 ]]; then
     rm -f "${FAILED_TXT}"
     echo "=== [result] ✅ All subjects passed QC thresholds."
@@ -83,4 +104,5 @@ else
 fi
 
 echo "=== [aggregate] QC table saved to ${GROUP_TSV}"
+rm -f "${RAW_TABLE}"
 exit 0
