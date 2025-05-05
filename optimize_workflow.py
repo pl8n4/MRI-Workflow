@@ -100,7 +100,6 @@ def main() -> None:
     print(f"Detected hardware      : {cores} logical cores, {total_ram:.1f} GB RAM")
     print(f"Reserving for system   : {reserve} core(s)")
     print(f"Cores available for jobs: {avail_cores}")
-    print(f"Per-job requirements   : {cores_per_job} core(s), {args.mem_per_job} GB RAM")
     print(f"Safe RAM fraction      : {args.safe_mem * 100:.0f}%")
     print(f"→ Maximum parallel jobs: {max_jobs}")
 
@@ -110,7 +109,6 @@ def main() -> None:
         batches = math.ceil(total / max_jobs)
         print(f"\nBatching strategy for {total} total jobs:")
         print(f"  • Jobs per batch          : {max_jobs}")
-        print(f"  • Cores per job           : {cores_per_job}")
         print(f"  • Number of batches       : {batches}")
 
 if __name__ == "__main__":
