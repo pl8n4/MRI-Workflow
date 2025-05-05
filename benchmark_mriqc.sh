@@ -1,99 +1,67 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-#  benchmark_mriqc.sh  —  Empirically benchmark MRIQC runtime vs. thread count
-# ---------------------------------------------------------------------------
-#  Usage:  ./benchmark_mriqc.sh [SUBJECT_LABEL]
-#
-#  * Loops over THREADS array (see below) and repeats each run REPS times.
-#  * Captures wall‑clock seconds with Bash’s built‑in `time -p`.
-#  * Prints an ASCII summary table compatible with benchmark_sswarper.sh and
-#    benchmark_afni_proc.sh.
-#
-#  Environment overrides
-#  ---------------------
-#    DATA_ROOT   : BIDS dataset root   (default = $PWD)
-#    IMG         : Singularity image   (default = ${DATA_ROOT}/mriqc_latest.sif)
-#    THREADS     : space‑delimited list of thread counts
-#    REPS        : # of repetitions per thread count
-#
-#  Requirements
-#  ------------
-#    * Singularity/Apptainer on $PATH
-#    * Bash ≥4 for associative arrays
-#
-#  Notes
-#  -----
-#    * MRIQC output is sent to ${DATA_ROOT}/derivatives/mriqc
-#    * Stdout/err from MRIQC is suppressed during timing to keep logs clean.
-# ---------------------------------------------------------------------------
+# benchmark_mriqc.sh
+# Loops over a set of thread counts and repeats,
+# times run_mriqc.sh, and prints a summary table with averages.
 
 set -euo pipefail
 
-# ----------------------------- User‑tunable vars ----------------------------
-DATA_ROOT="${DATA_ROOT:-$PWD}"
-IMG="${IMG:-${DATA_ROOT}/mriqc_latest.sif}"
+# ----------------- user parameters -----------------
+SUBJ_LABEL=${1:-08}                          # subject to test, default = 08
+DATA_ROOT=${DATA_ROOT:-$(pwd)}               # dataset root directory (override via DATA_ROOT)
+IMAGE_PATH=${IMAGE_PATH:-""}                 # path to MRIQC Singularity image (override via IMAGE_PATH)
+THREAD_LIST=${THREAD_LIST:-"4 8 12 16 24 32"} # thread counts to trial (override via THREAD_LIST)
+REPS=${REPS:-2}                              # how many repeats per setting (override via REPS)
+RUN_SCRIPT=${RUN_SCRIPT:-"./run_mriqc.sh"}   # path to MRIQC runner (override via RUN_SCRIPT)
+# ---------------------------------------------------
 
-# THREADS can be overridden via env: THREADS=\"2 4 8\" ./benchmark_mriqc.sh
-declare -a THREADS=(${THREADS:-"1 2 3 4 8 12 16 24 32"})
-REPS="${REPS:-2}"
-SUBJ="${1:-08}"                      # BIDS label without \"sub-\"
-BIDS_SUBJ="sub-${SUBJ}"
+# Change to dataset root
+cd "$DATA_ROOT"
 
-# Ceiling(thread*1.5) memory heuristic
-mem_guess() {
-  local t=$1
-  echo $(( (t * 3 + 1) / 2 ))
-}
+# If IMAGE_PATH is set, export SIF for run_mriqc.sh to pick up
+if [[ -n "${IMAGE_PATH}" ]]; then
+  export SIF="$IMAGE_PATH"
+fi
 
-# ---------------------------- Runtime containers ----------------------------
-declare -A TIMES           # concatenated list of run times per thread
-declare -A SUM             # running sum of times per thread (float via bc)
-bc_fmt='%.5f'
+# Convert THREAD_LIST string to array
+read -r -a THREADS <<< "$THREAD_LIST"
 
-# ------------------------------- Benchmarking ------------------------------
-echo "=== MRIQC benchmark : subject ${BIDS_SUBJ}  |  image=${IMG}"
-echo "Data root : ${DATA_ROOT}"
-echo "Threads    : ${THREADS[*]}"
-echo "Reps/run   : ${REPS}"
-echo "-----------------------------------------------------------------"
+declare -A ELAPSED                           # associative array to hold times
+TIMEFORMAT='%R'                             # only capture the 'real' time (in seconds)
 
-for thr in "${THREADS[@]}"; do
-  SUM[$thr]=0
-  TIMES[$thr]=""
-  for ((r=1; r<=REPS; r++)); do
-    mem=$(mem_guess "$thr")
-    time_out=$({ time -p singularity exec --cleanenv \
-                      -B "${DATA_ROOT}:/data" \
-                      "${IMG}" \
-                      mriqc /data /data/derivatives/mriqc \
-                          participant \
-                          --participant-label "${SUBJ}" \
-                          --n_procs "${thr}" \
-                          --mem_gb "${mem}" > /dev/null 2>&1; } 2>&1)
-    real_sec=$(awk '/^real /{print $2}' <<< "${time_out}")
-    # accumulate
-    SUM[$thr]=$(printf "$bc_fmt\n" "$(bc -l <<< "${SUM[$thr]} + ${real_sec}")")
-    TIMES[$thr]="${TIMES[$thr]} ${real_sec}"
-    echo "[thr=${thr}] rep ${r}/${REPS} : ${real_sec} s"
+echo "Benchmarking MRIQC for sub-${SUBJ_LABEL}"
+for threads in "${THREADS[@]}"; do
+  for ((rep=1; rep<=REPS; rep++)); do
+    echo -n "  [threads=$threads | run #$rep]  … "
+    # Run and capture the time (stdout/stderr suppressed)
+    t=$({ time "$RUN_SCRIPT" "$SUBJ_LABEL" "$threads" >/dev/null 2>&1; } 2>&1)
+    echo "${t}s"
+    ELAPSED["$threads,$rep"]=$t
   done
 done
 
-# --------------------------------- Summary ---------------------------------
-printf "\n%-7s" "thr"
-for ((r=1; r<=REPS; r++)); do printf " %10s" "run${r}"; done
-printf " %10s\n" "avg_s"
+# Print a summary table with averages
+echo -e "\n=== Elapsed times (seconds) ==="
+printf "%-8s" "Threads"
+for ((rep=1; rep<=REPS; rep++)); do
+  printf "%8s" "Run#$rep"
+done
+printf "%8s" "Avg"
+echo
+printf '%0.s-' {1..8}
+for ((i=0; i<REPS+1; i++)); do
+  printf '%8s' '--------'
+done
+echo
 
-printf -- "-------"
-for ((i=1; i<=REPS+1; i++)); do printf " %10s" "----------"; done
-printf "\n"
-
-for thr in "${THREADS[@]}"; do
-  read -ra tlist <<< "${TIMES[$thr]}"
-  printf "%-7s" "${thr}"
-  for val in "${tlist[@]}"; do
-    printf " %10.3f" "${val}"
+for threads in "${THREADS[@]}"; do
+  printf "%-8s" "$threads"
+  sum=0
+  for ((rep=1; rep<=REPS; rep++)); do
+    t=${ELAPSED["$threads,$rep"]}
+    printf "%8s" "$t"
+    sum=$(awk -v a="$sum" -v b="$t" 'BEGIN{printf "%.6f", a+b}')
   done
-  # average
-  avg=$(bc -l <<< "${SUM[$thr]} / ${REPS}")
-  printf " %10.3f\n" "${avg}"
+  avg=$(awk -v total="$sum" -v n="$REPS" 'BEGIN{printf "%.3f", total/n}')
+  printf "%8s" "$avg"
+  echo
 done
