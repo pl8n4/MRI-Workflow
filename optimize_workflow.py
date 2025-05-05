@@ -7,11 +7,13 @@ New in 2025‑05‑04
 =================
 * Simplified to practical limits: cores per job & RAM per job.
 * Removed runtime-based ETA; focus on maximum parallel jobs.
+* Added --total-jobs argument to compute batching strategy.
 """
 from __future__ import annotations
 
 import argparse
 import sys
+import math
 import psutil
 
 
@@ -52,6 +54,10 @@ def main() -> None:
         "--safe-mem", type=fraction_float, default=0.9,
         help="Fraction of total RAM to allow for jobs"
     )
+    parser.add_argument(
+        "--total-jobs", type=int, default=None,
+        help="Total number of jobs to schedule (optional, for batching)"
+    )
     args = parser.parse_args()
 
     cores, total_ram = detect_hardware()
@@ -69,6 +75,14 @@ def main() -> None:
     print(f"Per-job requirements: 1 core, {args.mem_per_job} GB RAM")
     print(f"Safe RAM fraction : {args.safe_mem * 100:.0f}%")
     print(f"→ Maximum parallel jobs: {max_jobs}")
+
+    if args.total_jobs is not None:
+        total = args.total_jobs
+        batches = math.ceil(total / max_jobs)
+        print(f"\nBatching strategy for {total} total jobs:")
+        print(f"  • Jobs per batch      : {max_jobs}")
+        print(f"  • Number of batches   : {batches}")
+        print(f"  • Total slots (batches × jobs): {batches * max_jobs}")
 
 
 if __name__ == "__main__":
