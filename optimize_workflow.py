@@ -9,6 +9,7 @@ New in 2025‑05‑04
 * Removed runtime-based ETA; focus on maximum parallel jobs.
 * Added --total-jobs argument to compute batching strategy.
 * Performance tends to plateau around 16–24 threads per job for most workflows/scripts.
+* Leaves configurable cores reserved for system tasks.
 """
 from __future__ import annotations
 
@@ -56,6 +57,10 @@ def main() -> None:
         help="Fraction of total RAM to allow for jobs"
     )
     parser.add_argument(
+        "--reserve-cores", type=int, default=2,
+        help="Number of cores to leave unallocated for system tasks"
+    )
+    parser.add_argument(
         "--total-jobs", type=int, default=None,
         help="Total number of jobs to schedule (optional, for batching)"
     )
@@ -68,11 +73,15 @@ def main() -> None:
             f"mem-per-job ({args.mem_per_job} GB) exceeds total RAM ({total_ram:.1f} GB)"
         )
 
+    # Reserve cores for system
+    reserve = max(0, args.reserve_cores)
+    avail_cores = max(1, cores - reserve)
+
     # Compute capacity by RAM
     ram_cap = int((total_ram * args.safe_mem) // args.mem_per_job) or 1
 
-    # Determine cores per job to evenly distribute available cores over ram-limited jobs
-    cores_per_job = max(1, cores // ram_cap)
+    # Determine cores per job to distribute available cores over RAM-limited jobs
+    cores_per_job = max(1, avail_cores // ram_cap)
 
     # Optionally cap cores per job at plateau (16-24 threads)
     plateau = 24
@@ -80,7 +89,7 @@ def main() -> None:
         cores_per_job = plateau
 
     # Compute capacity by CPU using computed cores_per_job
-    cpu_cap = cores // cores_per_job or 1
+    cpu_cap = avail_cores // cores_per_job or 1
 
     # Final max parallel jobs limited by both RAM and CPU
     max_jobs = min(ram_cap, cpu_cap)
@@ -88,9 +97,11 @@ def main() -> None:
     print("""
 * Note: performance tends to plateau around 16–24 threads per job for most workflows/scripts.
 """)
-    print(f"Detected hardware    : {cores} logical cores, {total_ram:.1f} GB RAM")
-    print(f"Per-job requirements : {cores_per_job} core(s), {args.mem_per_job} GB RAM")
-    print(f"Safe RAM fraction    : {args.safe_mem * 100:.0f}%")
+    print(f"Detected hardware      : {cores} logical cores, {total_ram:.1f} GB RAM")
+    print(f"Reserving for system   : {reserve} core(s)")
+    print(f"Cores available for jobs: {avail_cores}")
+    print(f"Per-job requirements   : {cores_per_job} core(s), {args.mem_per_job} GB RAM")
+    print(f"Safe RAM fraction      : {args.safe_mem * 100:.0f}%")
     print(f"→ Maximum parallel jobs: {max_jobs}")
 
     # Batching strategy if total jobs specified
@@ -98,10 +109,10 @@ def main() -> None:
         total = args.total_jobs
         batches = math.ceil(total / max_jobs)
         print(f"\nBatching strategy for {total} total jobs:")
-        print(f"  • Jobs per batch           : {max_jobs}")
-        print(f"  • Cores per job            : {cores_per_job}")
-        print(f"  • Number of batches        : {batches}")
-        print(f"  • Total slots (batches×jobs): {batches * max_jobs}")
+        print(f"  • Jobs per batch            : {max_jobs}")
+        print(f"  • Cores per job             : {cores_per_job}")
+        print(f"  • Number of batches         : {batches}")
+        print(f"  • Total slots (batches×jobs) : {batches * max_jobs}")
 
 
 if __name__ == "__main__":
