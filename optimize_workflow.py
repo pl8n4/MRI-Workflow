@@ -109,11 +109,9 @@ def main() -> None:
         total = args.total_jobs
         batches = math.ceil(total / max_jobs)
         print(f"\nBatching strategy for {total} total jobs:")
-        print(f"  • Jobs per batch            : {max_jobs}")
-        print(f"  • Cores per job             : {cores_per_job}")
-        print(f"  • Number of batches         : {batches}")
-        print(f"  • Total slots (batches×jobs) : {batches * max_jobs}")
-
+        print(f"  • Jobs per batch          : {max_jobs}")
+        print(f"  • Cores per job           : {cores_per_job}")
+        print(f"  • Number of batches       : {batches}")
 
 if __name__ == "__main__":
     main()
