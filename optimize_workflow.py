@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 optimize_workflow.py  ─ Recommend per‑subject parallel plan
@@ -8,6 +9,7 @@ New in 2025‑05‑04
 * Simplified to practical limits: cores per job & RAM per job.
 * Removed runtime-based ETA; focus on maximum parallel jobs.
 * Added --total-jobs argument to compute batching strategy.
+* Performance tends to plateau around 16–24 threads per job for most workflows/scripts.
 """
 from __future__ import annotations
 
@@ -71,6 +73,9 @@ def main() -> None:
     cpu_cap = cores // 1 or 1  # at least 1 core per job
     max_jobs = min(ram_cap, cpu_cap)
 
+    print("""
+* Note: performance tends to plateau around 16–24 threads per job for most workflows/scripts.
+""")
     print(f"Detected hardware : {cores} logical cores, {total_ram:.1f} GB RAM")
     print(f"Per-job requirements: 1 core, {args.mem_per_job} GB RAM")
     print(f"Safe RAM fraction : {args.safe_mem * 100:.0f}%")
@@ -87,3 +92,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
