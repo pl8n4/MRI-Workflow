@@ -20,12 +20,12 @@ fi
 
 SUBJ_LABEL="$1"
 N_PROCS="${2:-8}"        # number of CPU threads          (override from CLI)
-MEM_GB="${3:-16}"        # GB of RAM to request           (override from CLI)
+MEM_GB="${3:-10}"        # GB of RAM to request           (override from CLI)
 
 # --- Paths & image ---
 DATA_ROOT="$(pwd)"
 DERIV_DIR="${DATA_ROOT}/derivatives/mriqc"
-SIF="${IMAGE_PATH:-${DATA_ROOT}/mriqc_latest.sif}"
+SIF="${DATA_ROOT}/mriqc_latest.sif"
 
 # --- Prep directories & env ---
 echo "--- MRIQC: sub-${SUBJ_LABEL} | cores=${N_PROCS} | mem=${MEM_GB}GB ---"
