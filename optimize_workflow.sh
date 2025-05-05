@@ -9,30 +9,35 @@ fi
 TOTAL_JOBS="$1"
 MEM_PER_JOB_GB="$2"
 
-# 1) Detect total logical CPU cores
+# 1) Resources
 NUM_CORES=$(nproc)
-
-# 2) Detect total system RAM in GB
 TOTAL_RAM_GB=$(awk '/MemTotal/ {printf "%.2f", $2/1024/1024}' /proc/meminfo)
 
-# 3) Compute threads-per-job: evenly divide cores, cap at 16
-TPJ=$(( NUM_CORES / TOTAL_JOBS ))
-if (( TPJ > 16 )); then
-  TPJ=16
-fi
-
-# 4) Compute max parallel jobs under 90%–RAM constraint
+# 2) RAM-based parallelism (90% of RAM)
 USABLE_RAM_GB=$(awk "BEGIN {printf \"%.2f\", $TOTAL_RAM_GB * 0.9}")
 MAX_MEM_JOBS=$(awk "BEGIN {print int($USABLE_RAM_GB / $MEM_PER_JOB_GB)}")
+(( MAX_MEM_JOBS < 1 )) && MAX_MEM_JOBS=1
 
-# 5) Compute how many full batches are needed
-if (( MAX_MEM_JOBS > 0 )); then
-  BATCHES=$(( (TOTAL_JOBS + MAX_MEM_JOBS - 1) / MAX_MEM_JOBS ))
+# 3) How many will actually run at once?
+if (( MAX_MEM_JOBS < TOTAL_JOBS )); then
+  PARALLEL_JOBS=$MAX_MEM_JOBS
 else
-  BATCHES=0
+  PARALLEL_JOBS=$TOTAL_JOBS
 fi
 
-# 6) Print results
+# 4) Compute threads per job, reserving 2 cores
+RESERVE_CORES=2
+USABLE_CORES=$(( NUM_CORES - RESERVE_CORES ))
+(( USABLE_CORES < 1 )) && USABLE_CORES=1
+
+TPJ=$(( USABLE_CORES / PARALLEL_JOBS ))
+(( TPJ > 16 )) && TPJ=16
+(( TPJ < 1 ))  && TPJ=1
+
+# 5) Batches needed
+BATCHES=$(( (TOTAL_JOBS + MAX_MEM_JOBS - 1) / MAX_MEM_JOBS ))
+
+# 6) Output
 echo "Threads per job:          $TPJ"
 echo "Max parallel jobs (RAM):  $MAX_MEM_JOBS"
 echo "Full batches needed:      $BATCHES"
