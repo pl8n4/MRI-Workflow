@@ -9,7 +9,7 @@ source "${MYDIR}/workflow.conf"
 cd "${BIDS_ROOT}"
 
 SID="$1"
-LABEL="sub-${SID}"                  # 01, FT, etc., WITHOUT sub- prefix
+LABEL="sub-${SID}"
 NCORES="${2:-8}"
 export OMP_NUM_THREADS="$NCORES"
 T1="${LABEL}/anat/${LABEL}_T1w.nii.gz"
