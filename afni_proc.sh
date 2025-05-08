@@ -26,13 +26,17 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
-SUBJ_LABEL="$1"            # e.g., 01, FT (no 'sub-')
-BIDS_SUBJ="sub-${SUBJ_LABEL}"
+MYDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source "${MYDIR}/workflow.conf"
+cd "${BIDS_ROOT}"
+
+SID="$1"            # e.g., 01, FT (no 'sub-')
+BIDS_SUBJ="sub-${SID}"
 NCORES="${2:-8}"
 export OMP_NUM_THREADS="$NCORES"
 
 echo "--- Running AFNI Preprocessing ---"
-echo "Subject Label: ${SUBJ_LABEL}"
+echo "Subject Label: ${SID}"
 echo "BIDS Subject ID: ${BIDS_SUBJ}"
 echo "Number of Cores: ${NCORES}"
 echo "----------------------------------"
@@ -42,22 +46,22 @@ ANAT_ORIGINAL_NIFTI="${BIDS_SUBJ}/anat/${BIDS_SUBJ}_T1w.nii.gz"
 EPI_DSETS="${BIDS_SUBJ}/func/${BIDS_SUBJ}_task-*_bold.nii.gz"
 
 # --- TLRC template (MNI) ---
-TLRC_BASE="/users/pl8n4/abin/MNI152_2009_template_SSW.nii.gz"
+TLRC_BASE="MNI152_2009_template_SSW.nii.gz"
 
 # --- Derivatives (@SSwarper outputs) ---
-SSWARPER_DIR="derivatives/sswarper/${SUBJ_LABEL}"
-ANAT_SS="${SSWARPER_DIR}/anatSS.${SUBJ_LABEL}.nii"
+SSWARPER_DIR="derivatives/sswarper/${SID}"
+ANAT_SS="${SSWARPER_DIR}/anatSS.${SID}.nii"
 
 # Convert SSwarper .nii to AFNI +tlrc if needed
-if [[ ! -f "${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}+tlrc.HEAD" ]]; then
+if [[ ! -f "${SSWARPER_DIR}/anatQQ.${SID}+tlrc.HEAD" ]]; then
   echo "Converting SSwarper output to AFNI format: anatQQ+tlrc"
-  3dcopy "${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}.nii" \
-         "${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}+tlrc"
+  3dcopy "${SSWARPER_DIR}/anatQQ.${SID}.nii" \
+         "${SSWARPER_DIR}/anatQQ.${SID}+tlrc"
 fi
-ANAT_QQ="${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}+tlrc"
+ANAT_QQ="${SSWARPER_DIR}/anatQQ.${SID}+tlrc"
 
-ANAT_AFFINE="${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}.aff12.1D"
-ANAT_WARP="${SSWARPER_DIR}/anatQQ.${SUBJ_LABEL}_WARP.nii"
+ANAT_AFFINE="${SSWARPER_DIR}/anatQQ.${SID}.aff12.1D"
+ANAT_WARP="${SSWARPER_DIR}/anatQQ.${SID}_WARP.nii"
 
 # --- Generate AFNI 1D timing files from BIDS events.tsv ---
 TASK="passiveimageviewing"
@@ -103,7 +107,7 @@ fi
 
 # --- Run afni_proc.py ---
 afni_proc.py \
-  -subj_id               "${SUBJ_LABEL}" \
+  -subj_id               "${SID}" \
   -out_dir               "${PROC_DIR}" \
   -scr_overwrite \
   -blocks                tshift align tlrc volreg mask blur scale regress \

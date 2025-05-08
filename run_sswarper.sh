@@ -4,16 +4,22 @@
 set -euo pipefail
 [[ $# -lt 1 ]] && { echo "Usage: $0 <SUBJECT_ID> [N_CORES]"; exit 1; }
 
-SID="$1"                  # 01, FT, etc., WITHOUT sub- prefix
-BIDS_SUBJ="sub-${SID}"
+MYDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source "${MYDIR}/workflow.conf"
+cd "${BIDS_ROOT}"
+
+SID="$1"
+LABEL="sub-${SID}"                  # 01, FT, etc., WITHOUT sub- prefix
 NCORES="${2:-8}"
 export OMP_NUM_THREADS="$NCORES"
-T1="${BIDS_SUBJ}/anat/${BIDS_SUBJ}_T1w.nii.gz"
+T1="${LABEL}/anat/${LABEL}_T1w.nii.gz"
+
+SSW_TEMPLATE="MNI152_2009_template_SSW.nii.gz"
 
 @SSwarper                                   \
     -input      "$T1"                       \
-    -base       MNI152_2009_template_SSW.nii.gz \
+    -base       "${SSW_TEMPLATE}"           \
     -subid      "$SID"                      \
-    -odir    derivatives/sswarper/"${SID}"
+    -odir    "derivatives/sswarper/${SID}"
 
 echo -e "\n[INFO] Finished @SSwarper for subject $SID"
