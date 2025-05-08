@@ -9,7 +9,9 @@ source "${MYDIR}/workflow.conf"
 cd "${BIDS_ROOT}"
 
 # Safely launch phases explicitly
-"${MYDIR}/run_phase.sh" MRIQC
+# MRQIC should be run manually as ./run_phase.sh MRIQC to allow for manual checking of QC
+
+#"${MYDIR}/run_phase.sh" MRIQC
 "${MYDIR}/run_phase.sh" SSW
 "${MYDIR}/run_phase.sh" AFNI
 
