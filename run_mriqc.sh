@@ -4,7 +4,7 @@
 # USAGE: ./run_mriqc.sh <SUBJECT_LABEL> [N_CORES] [MEM_GB]
 #   e.g. 08 16 32
 #
-# This script assumes it’s run from a BIDS‐root directory.
+# This script assumes it’s run from a BIDS‑root directory.
 # Outputs go into derivatives/mriqc, and tmp files into ./tmp.
 
 set -euo pipefail
@@ -30,23 +30,27 @@ MEM_GB="${3:-10}"        # GB of RAM to request           (override from CLI)
 DERIV_DIR="${DERIV_ROOT}/mriqc"
 SIF="${SIF_IMAGE}"
 
-mkdir -p "${DERIV_ROOT}"
-mkdir -p "${DERIV_DIR}"
+mkdir -p "${DERIV_ROOT}" "${DERIV_DIR}"
 
-# --- Prep directories & env ---
 echo "--- MRIQC: sub-${SID} | cores=${N_PROCS} | mem=${MEM_GB}GB ---"
-export TMPDIR="${BIDS_ROOT}/tmp"
-mkdir -p "${TMPDIR}"
 
-# --- Run MRIQC via Singularity ---
+# Use a fresh TMPDIR and workdir to avoid cache reuse
+export TMPDIR="${BIDS_ROOT}/tmp"
+WORKDIR="${TMPDIR}/mriqc_work/sub-${SID}"
+rm -rf "${WORKDIR}"
+mkdir -p "${TMPDIR}" "${WORKDIR}"
+
+# --- Run MRIQC via Singularity with full thread control ---
 SINGULARITYENV_OMP_NUM_THREADS="${N_PROCS}" \
 SINGULARITYENV_ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS="${N_PROCS}" \
 SINGULARITYENV_MKL_NUM_THREADS="${N_PROCS}" \
 singularity exec --cleanenv \
     --bind "${BIDS_ROOT}:/data" \
-    --bind "${TMPDIR}:/tmp" \
+    --bind "${WORKDIR}:/work" \
     "${SIF}" \
     mriqc /data /data/derivatives/mriqc participant \
       --participant-label "${SID}" \
       --n_procs "${N_PROCS}" \
-      --mem_gb "${MEM_GB}"
+      --mem_gb "${MEM_GB}" \
+      --ants-nthreads "${N_PROCS}" \
+      --work-dir /work

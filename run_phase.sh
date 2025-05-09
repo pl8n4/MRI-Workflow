@@ -30,8 +30,7 @@ export OMP_NUM_THREADS="$TPJ"   # picked up by sub‑scripts
 
 # 4) Launch ------------------------------------------------------------------
 if [[ "$LAUNCHER" == "local" ]]; then
-  printf '%s\n' $SUBJECTS | \
-      parallel -j "$PARALLEL" "$JOB" {} "$TPJ" "$RAM" "$@"
+    parallel -j "$PARALLEL" "$JOB" {} "$TPJ" "$RAM" "$@" ::: $SUBJECT_LIST
 else
   # build and submit slurm array: one task per subject, capped by $PARALLEL
   mapfile -t array <<<"$SUBJECTS"
