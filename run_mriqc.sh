@@ -39,6 +39,9 @@ export TMPDIR="${BIDS_ROOT}/tmp"
 mkdir -p "${TMPDIR}"
 
 # --- Run MRIQC via Singularity ---
+SINGULARITYENV_OMP_NUM_THREADS="${N_PROCS}" \
+SINGULARITYENV_ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS="${N_PROCS}" \
+SINGULARITYENV_MKL_NUM_THREADS="${N_PROCS}" \
 singularity exec --cleanenv \
     --bind "${BIDS_ROOT}:/data" \
     --bind "${TMPDIR}:/tmp" \
