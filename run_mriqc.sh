@@ -40,7 +40,7 @@ WORKDIR="${TMPDIR}/mriqc_work/sub-${SID}"
 rm -rf "${WORKDIR}"
 mkdir -p "${TMPDIR}" "${WORKDIR}"
 
-# --- Run MRIQC via Singularity with full thread control ---
+# --- Run MRIQC via Singularity ----------------------------------------------
 SINGULARITYENV_OMP_NUM_THREADS="${N_PROCS}" \
 SINGULARITYENV_ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS="${N_PROCS}" \
 SINGULARITYENV_MKL_NUM_THREADS="${N_PROCS}" \
@@ -50,7 +50,8 @@ singularity exec --cleanenv \
     "${SIF}" \
     mriqc /data /data/derivatives/mriqc participant \
       --participant-label "${SID}" \
-      --n_procs "${N_PROCS}" \
-      --mem_gb "${MEM_GB}" \
-      --ants-nthreads "${N_PROCS}" \
-      --work-dir /work
+      --n_procs        "${N_PROCS}" \
+      --omp-nthreads   "${N_PROCS}" \
+      --ants-nthreads  "${N_PROCS}" \
+      --mem_gb         "${MEM_GB}"  \
+      --work-dir       /work
