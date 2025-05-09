@@ -19,9 +19,10 @@ case "$PHASE" in
 esac
 
 # 3) Ask optimize_workflow.py how many can run in parallel
-read -r TPJ PARALLEL <<<"$(
-  ./${WORKFLOW_DIR}/optimize_workflow.py "$TOTAL_SUBJECTS" "$RAM" \
-    | awk '/Threads per job|Parallel jobs/ {print $NF}'
+read -r TPJ PARALLEL _ <<<"$(
+    ${WORKFLOW_DIR}/optimize_workflow.py "$TOTAL" "$RAM" \
+      | awk '/Threads|Max/ {print $NF}' \
+      | tr '\n' ' '
 )"
 echo "[${PHASE}] threads/job=${TPJ}  parallel_jobs=${PARALLEL}"
 
