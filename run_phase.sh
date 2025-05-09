@@ -8,29 +8,29 @@ source workflow.conf
 cd "$BIDS_ROOT"
 
 # 1) Subject list = all sub-* folders unless restricted by $SUBS env‑var
-SUBJECTS=${SUBS:-$(ls -d sub-* | sed 's/^sub-//')}
-TOTAL=$(echo "$SUBJECTS" | wc -w)
+SUBJECTS=${SUBJECT_LIST}
 
 # 2) Pick per‑phase resources
 case "$PHASE" in
-  MRIQC) JOB="$RUN_MRIQC" ; CORES=$MRIQC_CORES ; RAM=$MRIQC_RAM ;;
-  SSW)   JOB="$RUN_SSW"   ; CORES=$SSW_CORES   ; RAM=$SSW_RAM   ;;
-  AFNI)  JOB="$RUN_AFNI"  ; CORES=$AFNI_CORES  ; RAM=$AFNI_RAM   ;;
-  *)     echo "Unknown phase $PHASE" ; exit 1 ;;
+  MRIQC) JOB="$RUN_MRIQC" ; RAM="$MRIQC_RAM" ;;
+  SSW)   JOB="$RUN_SSW"   ; RAM="$SSW_RAM"   ;;
+  AFNI)  JOB="$RUN_AFNI"  ; RAM="$AFNI_RAM"  ;;
+  *)     echo "Unknown phase $PHASE" >&2 ; exit 1 ;;
 esac
 
 # 3) Ask optimize_workflow.py how many can run in parallel
-read -r TPJ PARALLEL _ <<<"$(
-    ./optimize_workflow.py "$TOTAL" "$RAM" | awk '/Threads|Max/ {print $NF}'
+read -r TPJ PARALLEL <<<"$(
+  ./${WORKFLOW_DIR}/optimize_workflow.py "$TOTAL_SUBJECTS" "$RAM" \
+    | awk '/Threads per job|Parallel jobs/ {print $NF}'
 )"
 echo "[${PHASE}] threads/job=${TPJ}  parallel_jobs=${PARALLEL}"
 
-export OMP_NUM_THREADS=$TPJ   # picked up by sub‑scripts
+export OMP_NUM_THREADS="$TPJ"   # picked up by sub‑scripts
 
 # 4) Launch ------------------------------------------------------------------
 if [[ "$LAUNCHER" == "local" ]]; then
   printf '%s\n' $SUBJECTS | \
-     parallel -j "$PARALLEL" "$JOB" {} "$TPJ" "$RAM"
+      parallel -j "$PARALLEL" "$JOB" {} "$TPJ" "$RAM" "$@"
 else
   # build and submit slurm array: one task per subject, capped by $PARALLEL
   mapfile -t array <<<"$SUBJECTS"

@@ -83,9 +83,9 @@ def main():
     batches = math.ceil(J / parallel_jobs)
 
     # 7) Print results
-    print(f"Threads per job:          {tpj}")
-    print(f"Max parallel jobs (RAM):  {max_mem_jobs}")
-    print(f"Full batches needed:      {batches}")
+    print(f"Threads per job:  {tpj}")
+    print(f"Parallel jobs:    {parallel_jobs}")
+    print(f"Batches needed:   {batches}")
 
 if __name__ == "__main__":
     main()
