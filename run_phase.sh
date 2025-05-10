@@ -10,12 +10,6 @@ cd "$BIDS_ROOT"
 export BIDS_TMP="${BIDS_ROOT}/tmp"
 mkdir -p "${BIDS_TMP}"
 
-export PARALLEL_TMPDIR="${BIDS_TMP}/parallel"
-
-mapfile -t SUBJECTS < <(printf '%s\n' "${SUBJECT_LIST}")
-
-TOTAL_SUBJECTS=${#SUBJECTS[@]}
-
 # 1) Subject list = all sub-* folders unless restricted by $SUBS env‑var
 SUBJECTS=${SUBJECT_LIST}
 
@@ -38,19 +32,11 @@ echo "[${PHASE}] threads/job=${TPJ}  parallel_jobs=${PARALLEL}  batches=${BATCHE
 export OMP_NUM_THREADS="$TPJ"   # per‑job thread fan‑out
 
 # 4) Launch ------------------------------------------------------------------
-for (( batch_idx=0; batch_idx< BATCHES; batch_idx++ )); do
-  mkdir -p "${PARALLEL_TMPDIR}"
-  rm -rf "${PARALLEL_TMPDIR}/"*
-
-  start=$(( batch_idx * PARALLEL ))
-  slice=( "${SUBJECTS[@]:start:PARALLEL}" )
-
-  parallel \
-    --tmpdir "${PARALLEL_TMPDIR}" \
-    --compress \
-    -j "${PARALLEL}" \
-    "$JOB" {} "$TPJ" "$RAM" ::: "${slice[@]}"
-
+if [[ "$LAUNCHER" == "local" ]]; then
+    parallel -u \
+        -j "$PARALLEL" \
+        "$JOB" {} "$TPJ" "$RAM" ::: $SUBJECT_LIST
+    
     if [[ "${PHASE}" == "MRIQC" && "${RUN_MRIQC_GROUP,,}" == "true" ]]; then
         echo "→ All MRIQC participant runs done; launching MRIQC group stage…"
         singularity exec --cleanenv \
@@ -59,7 +45,6 @@ for (( batch_idx=0; batch_idx< BATCHES; batch_idx++ )); do
             mriqc /data /data/derivatives/mriqc group
         echo "✔ group_*.tsv & group_*.html now in derivatives/mriqc/"
     fi
-done
 
 else
   # build and submit slurm array: one task per subject, capped by $PARALLEL
