@@ -7,9 +7,6 @@ shift             # remaining args forwarded to per‑subject script
 source workflow.conf
 cd "$BIDS_ROOT"
 
-export BIDS_TMP="${BIDS_ROOT}/tmp"
-mkdir -p "${BIDS_TMP}"
-
 # 1) Subject list = all sub-* folders unless restricted by $SUBS env‑var
 SUBJECTS=${SUBJECT_LIST}
 
@@ -35,7 +32,8 @@ export OMP_NUM_THREADS="$TPJ"   # per‑job thread fan‑out
 if [[ "$LAUNCHER" == "local" ]]; then
     parallel -u \
         -j "$PARALLEL" \
-        "$JOB" {} "$TPJ" "$RAM" ::: $SUBJECT_LIST
+        "$JOB" {} "$TPJ" "$RAM" ::: $SUBJECT_LIST \
+        > /dev/null 2>&1
     
     if [[ "${PHASE}" == "MRIQC" && "${RUN_MRIQC_GROUP,,}" == "true" ]]; then
         echo "→ All MRIQC participant runs done; launching MRIQC group stage…"
