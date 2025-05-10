@@ -44,7 +44,7 @@ for (( batch_idx=0; batch_idx< BATCHES; batch_idx++ )); do
 
   start=$(( batch_idx * PARALLEL ))
   slice=( "${SUBJECTS[@]:start:PARALLEL}" )
-  printf '→ Running batch %d/%d: %s\n'  "$((batch+1))" "$BATCHES"  "${slice[*]}"
+  printf '→ Running batch %d/%d: %s\n'  "$((batch_idx+1))" "$BATCHES"  "${slice[*]}"
 
   parallel \
     --tmpdir "${PARALLEL_TMPDIR}" \
