@@ -52,6 +52,15 @@ for (( batch_idx=0; batch_idx< BATCHES; batch_idx++ )); do
     --compress \
     -j "${PARALLEL}" \
     "$JOB" {} "$TPJ" "$RAM" ::: "${slice[@]}"
+
+    if [[ "${PHASE}" == "MRIQC" && "${RUN_MRIQC_GROUP,,}" == "true" ]]; then
+        echo "→ All MRIQC participant runs done; launching MRIQC group stage…"
+        singularity exec --cleanenv \
+            --bind "${BIDS_ROOT}:/data" \
+            "${SIF_IMAGE}" \
+            mriqc /data /data/derivatives/mriqc group
+        echo "✔ group_*.tsv & group_*.html now in derivatives/mriqc/"
+    fi
 done
 
 else
@@ -69,19 +78,3 @@ set -- $SUBJECTS ; SUBJ=${!idx+1}
 $JOB "$SUBJ" "$OMP_NUM_THREADS" "$RAM"
 EOF
 fi
-
-if [[ "$LAUNCHER" == "local" ]]; then
-    parallel \
-        --tmpdir "${PARALLEL_TMPDIR}" \
-        --compress \
-        -j "$PARALLEL" \
-        "$JOB" {} "$TPJ" "$RAM" ::: $SUBJECT_LIST
-    
-    if [[ "${PHASE}" == "MRIQC" && "${RUN_MRIQC_GROUP,,}" == "true" ]]; then
-        echo "→ All MRIQC participant runs done; launching MRIQC group stage…"
-        singularity exec --cleanenv \
-            --bind "${BIDS_ROOT}:/data" \
-            "${SIF_IMAGE}" \
-            mriqc /data /data/derivatives/mriqc group
-        echo "✔ group_*.tsv & group_*.html now in derivatives/mriqc/"
-    fi
