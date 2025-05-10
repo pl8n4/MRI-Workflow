@@ -12,6 +12,10 @@ mkdir -p "${BIDS_TMP}"
 
 export PARALLEL_TMPDIR="${BIDS_TMP}/parallel"
 
+mapfile -t SUBJECTS < <(printf '%s\n' "${SUBJECT_LIST}")
+
+TOTAL_SUBJECTS=${#SUBJECTS[@]}
+
 # 1) Subject list = all sub-* folders unless restricted by $SUBS env‑var
 SUBJECTS=${SUBJECT_LIST}
 
@@ -33,11 +37,12 @@ echo "[${PHASE}] threads/job=${TPJ}  parallel_jobs=${PARALLEL}  batches=${BATCHE
 
 export OMP_NUM_THREADS="$TPJ"   # per‑job thread fan‑out
 
-# 4) Launch in batches -------------------------------------------------------
+# 4) Launch ------------------------------------------------------------------
 for (( batch_idx=0; batch_idx< BATCHES; batch_idx++ )); do
+  # clear out old parallel buffers before this batch
   mkdir -p "${PARALLEL_TMPDIR}"
   rm -rf "${PARALLEL_TMPDIR}/"*
-  
+
   start=$(( batch_idx * PARALLEL ))
   slice=( "${SUBJECTS[@]:start:PARALLEL}" )
   echo "→ Running batch $((batch_idx+1))/$BATCHES: ${slice[*]}"
@@ -49,16 +54,7 @@ for (( batch_idx=0; batch_idx< BATCHES; batch_idx++ )); do
     "$JOB" {} "$TPJ" "$RAM" ::: "${slice[@]}"
 done
 
-# 5) (MRIQC only) optionally run group stage
-if [[ "${PHASE}" == "MRIQC" && "${RUN_MRIQC_GROUP,,}" == "true" ]]; then
-  echo "→ All MRIQC participant runs done; launching MRIQC group stage…"
-  singularity exec --cleanenv \
-    --bind "${BIDS_ROOT}:/data" \
-    "${SIF_IMAGE}" \
-    mriqc /data /data/derivatives/mriqc group
-  echo "✔ group_*.tsv & group_*.html now in derivatives/mriqc/"
-fi
-
+else
   # build and submit slurm array: one task per subject, capped by $PARALLEL
   mapfile -t array <<<"$SUBJECTS"
   SLURM_ARRAY="${array[*]}"
@@ -73,3 +69,19 @@ set -- $SUBJECTS ; SUBJ=${!idx+1}
 $JOB "$SUBJ" "$OMP_NUM_THREADS" "$RAM"
 EOF
 fi
+
+if [[ "$LAUNCHER" == "local" ]]; then
+    parallel \
+        --tmpdir "${PARALLEL_TMPDIR}" \
+        --compress \
+        -j "$PARALLEL" \
+        "$JOB" {} "$TPJ" "$RAM" ::: $SUBJECT_LIST
+    
+    if [[ "${PHASE}" == "MRIQC" && "${RUN_MRIQC_GROUP,,}" == "true" ]]; then
+        echo "→ All MRIQC participant runs done; launching MRIQC group stage…"
+        singularity exec --cleanenv \
+            --bind "${BIDS_ROOT}:/data" \
+            "${SIF_IMAGE}" \
+            mriqc /data /data/derivatives/mriqc group
+        echo "✔ group_*.tsv & group_*.html now in derivatives/mriqc/"
+    fi
