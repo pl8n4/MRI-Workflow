@@ -25,34 +25,39 @@ case "$PHASE" in
   *)     echo "Unknown phase $PHASE" >&2 ; exit 1 ;;
 esac
 
-# 3) Ask optimize_workflow.py how many can run in parallel
-read -r TPJ PARALLEL _ <<<"$(
-    "${WORKFLOW_DIR}/optimize_workflow.py" "$TOTAL_SUBJECTS" "$RAM" \
-      | awk '/Threads per job|Parallel jobs/ {print $NF}' \
-      | tr '\n' ' '
+# 3) Ask optimize_workflow.py for TPJ, PARALLEL & BATCHES
+read -r TPJ PARALLEL BATCHES <<<"$(
+  "${WORKFLOW_DIR}/optimize_workflow.py" "$TOTAL_SUBJECTS" "$RAM" \
+    | awk '/Threads per job|Parallel jobs|Batches needed/ {print $NF}' \
+    | tr '\n' ' '
 )"
-echo "[${PHASE}] threads/job=${TPJ}  parallel_jobs=${PARALLEL}"
+echo "[${PHASE}] threads/job=${TPJ}  parallel_jobs=${PARALLEL}  batches=${BATCHES}"
 
-export OMP_NUM_THREADS="$TPJ"   # picked up by sub‑scripts
+export OMP_NUM_THREADS="$TPJ"   # per‑job thread fan‑out
 
-# 4) Launch ------------------------------------------------------------------
-if [[ "$LAUNCHER" == "local" ]]; then
-    parallel \
-        --tmpdir "${PARALLEL_TMPDIR}" \
-        --compress \
-        -j "$PARALLEL" \
-        "$JOB" {} "$TPJ" "$RAM" ::: $SUBJECT_LIST
-    
-    if [[ "${PHASE}" == "MRIQC" && "${RUN_MRIQC_GROUP,,}" == "true" ]]; then
-        echo "→ All MRIQC participant runs done; launching MRIQC group stage…"
-        singularity exec --cleanenv \
-            --bind "${BIDS_ROOT}:/data" \
-            "${SIF_IMAGE}" \
-            mriqc /data /data/derivatives/mriqc group
-        echo "✔ group_*.tsv & group_*.html now in derivatives/mriqc/"
-    fi
+# 4) Launch in batches -------------------------------------------------------
+for (( batch_idx=0; batch_idx< BATCHES; batch_idx++ )); do
+  start=$(( batch_idx * PARALLEL ))
+  slice=( "${SUBJECTS[@]:start:PARALLEL}" )
+  echo "→ Running batch $((batch_idx+1))/$BATCHES: ${slice[*]}"
 
-else
+  parallel \
+    --tmpdir "${PARALLEL_TMPDIR}" \
+    --compress \
+    -j "${PARALLEL}" \
+    "$JOB" {} "$TPJ" "$RAM" ::: "${slice[@]}"
+done
+
+# 5) (MRIQC only) optionally run group stage
+if [[ "${PHASE}" == "MRIQC" && "${RUN_MRIQC_GROUP,,}" == "true" ]]; then
+  echo "→ All MRIQC participant runs done; launching MRIQC group stage…"
+  singularity exec --cleanenv \
+    --bind "${BIDS_ROOT}:/data" \
+    "${SIF_IMAGE}" \
+    mriqc /data /data/derivatives/mriqc group
+  echo "✔ group_*.tsv & group_*.html now in derivatives/mriqc/"
+fi
+
   # build and submit slurm array: one task per subject, capped by $PARALLEL
   mapfile -t array <<<"$SUBJECTS"
   SLURM_ARRAY="${array[*]}"
