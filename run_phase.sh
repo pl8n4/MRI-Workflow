@@ -39,13 +39,12 @@ export OMP_NUM_THREADS="$TPJ"   # per‑job thread fan‑out
 
 # 4) Launch ------------------------------------------------------------------
 for (( batch_idx=0; batch_idx< BATCHES; batch_idx++ )); do
-  # clear out old parallel buffers before this batch
   mkdir -p "${PARALLEL_TMPDIR}"
   rm -rf "${PARALLEL_TMPDIR}/"*
 
   start=$(( batch_idx * PARALLEL ))
   slice=( "${SUBJECTS[@]:start:PARALLEL}" )
-  echo "→ Running batch $((batch_idx+1))/$BATCHES: ${slice[*]}"
+  printf '→ Running batch %d/%d: %s\n'  "$((batch+1))" "$BATCHES"  "${slice[*]}"
 
   parallel \
     --tmpdir "${PARALLEL_TMPDIR}" \
