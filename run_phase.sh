@@ -31,6 +31,16 @@ export OMP_NUM_THREADS="$TPJ"   # picked up by sub‑scripts
 # 4) Launch ------------------------------------------------------------------
 if [[ "$LAUNCHER" == "local" ]]; then
     parallel -j "$PARALLEL" "$JOB" {} "$TPJ" "$RAM" "$@" ::: $SUBJECT_LIST
+    
+    if [[ "${PHASE}" == "MRIQC" && "${RUN_MRIQC_GROUP,,}" == "true" ]]; then
+        echo "→ All MRIQC participant runs done; launching MRIQC group stage…"
+        singularity exec --cleanenv \
+            --bind "${BIDS_ROOT}:/data" \
+            "${SIF_IMAGE}" \
+            mriqc /data /data/derivatives/mriqc group
+        echo "✔ group_*.tsv & group_*.html now in derivatives/mriqc/"
+    fi
+
 else
   # build and submit slurm array: one task per subject, capped by $PARALLEL
   mapfile -t array <<<"$SUBJECTS"
