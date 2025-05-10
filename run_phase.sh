@@ -11,8 +11,6 @@ export BIDS_TMP="${BIDS_ROOT}/tmp"
 mkdir -p "${BIDS_TMP}"
 
 export PARALLEL_TMPDIR="${BIDS_TMP}/parallel"
-mkdir -p "${PARALLEL_TMPDIR}"
-rm -rf "${PARALLEL_TMPDIR}/"* 
 
 # 1) Subject list = all sub-* folders unless restricted by $SUBS env‑var
 SUBJECTS=${SUBJECT_LIST}
@@ -37,6 +35,9 @@ export OMP_NUM_THREADS="$TPJ"   # per‑job thread fan‑out
 
 # 4) Launch in batches -------------------------------------------------------
 for (( batch_idx=0; batch_idx< BATCHES; batch_idx++ )); do
+  mkdir -p "${PARALLEL_TMPDIR}"
+  rm -rf "${PARALLEL_TMPDIR}/"*
+  
   start=$(( batch_idx * PARALLEL ))
   slice=( "${SUBJECTS[@]:start:PARALLEL}" )
   echo "→ Running batch $((batch_idx+1))/$BATCHES: ${slice[*]}"
