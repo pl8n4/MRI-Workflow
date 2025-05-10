@@ -12,6 +12,7 @@ mkdir -p "${BIDS_TMP}"
 
 export PARALLEL_TMPDIR="${BIDS_TMP}/parallel"
 mkdir -p "${PARALLEL_TMPDIR}"
+rm -rf "${PARALLEL_TMPDIR}/"* 
 
 # 1) Subject list = all sub-* folders unless restricted by $SUBS env‑var
 SUBJECTS=${SUBJECT_LIST}
@@ -38,6 +39,7 @@ export OMP_NUM_THREADS="$TPJ"   # picked up by sub‑scripts
 if [[ "$LAUNCHER" == "local" ]]; then
     parallel \
         --tmpdir "${PARALLEL_TMPDIR}" \
+        --compress \
         -j "$PARALLEL" \
         "$JOB" {} "$TPJ" "$RAM" ::: $SUBJECT_LIST
     
