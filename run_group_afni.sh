@@ -20,7 +20,7 @@ cd "${DERIV_ROOT}/afni_proc"          # each subject has its own directory
 
 CONTRAST="${1:-F-NF}"                 # must match the -glt_label in afni_proc
 MASK="${2:-}"                         # leave empty to let 3dttest++ auto‑mask
-PREFIX="${DERIV_ROOT}/group_afni/${CONTRAST}_ttest"
+PREFIX="../group_afni/${CONTRAST}_ttest"
 
 mkdir -p "$( dirname "$PREFIX" )"
 
