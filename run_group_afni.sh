@@ -34,22 +34,27 @@ echo "-----------------------------------------------------------"
 # ----- Build the list of sub‑brick paths -------------------------------
 SET_A=()
 for SID in $SUBJECT_LIST ; do
-    STAT_DSET="${SID}/stats.REML+tlrc"
-    coef="${STAT_DSET}[${CONTRAST}#0_Coef]"
-    [[ -f ${STAT_DSET}.HEAD ]] || { echo "❌ Missing ${STAT_DSET}" ; exit 1; }
-    # verify that the sub‑brick exists (quietly)
-    3dinfo -label2index "${CONTRAST}#0_Coef" "${STAT_DSET}" >/dev/null 2>&1 \
-        || { echo "❌ ${CONTRAST} not found in ${STAT_DSET}" ; exit 1; }
-    SET_A+=( "$coef" )
+    # Allow flexible stats file naming
+    if [[ -f sub-${SID}/stats.REML+tlrc.HEAD ]]; then
+        STAT_BASENAME="sub-${SID}/stats.REML+tlrc"
+    else
+        STAT_BASENAME=$(ls sub-${SID}/stats.${SID}_REML+tlrc.HEAD 2>/dev/null | head -n1 | sed 's/\.HEAD$//')
+    fi
+    [[ -n "$STAT_BASENAME" ]] \
+        || { echo "❌ No stats.*_REML+tlrc file for sub-${SID}" ; exit 1; }
+
+    coef="${STAT_BASENAME}[${CONTRAST}#0_Coef]"
+    # Ensure quotes here!
+    SET_A+=("${coef}")
 done
 
 # ----- Launch 3dttest++ -------------------------------------------------
-3dttest++                                    \
-    -prefix      "$PREFIX"                   \
-    -setA        "$CONTRAST" "${SET_A[@]}"   \
-    ${MASK:+-mask "$MASK"}                   \
-    -Clustsim                                \ # optional: add cluster-sim thresh
-    -DAFNI_OMP_NUM_THREADS=$OMP_NUM_THREADS
+3dttest++                             \
+    -prefix   "$PREFIX"               \
+    -setA     "${SET_A[@]}"           \
+    ${MASK:+-mask "$MASK"}            \
+    -Clustsim "${OMP_NUM_THREADS}"    \
+    -DAFNI_OMP_NUM_THREADS="${OMP_NUM_THREADS}"
 
 echo -e "\n✅  Group-level file written  →  ${PREFIX}+tlrc.*"
 echo    "    Inspect with afni or SUMA, or feed into 3dClusterize for thresholding."
