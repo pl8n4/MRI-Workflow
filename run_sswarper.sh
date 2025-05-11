@@ -4,6 +4,9 @@
 set -euo pipefail
 [[ $# -lt 1 ]] && { echo "Usage: $0 <SUBJECT_ID> [N_CORES]"; exit 1; }
 
+# tmpdir with lots of disk space 
+export TMPDIR=/mydata/sswarper_tmp
+
 MYDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source "${MYDIR}/workflow.conf"
 cd "${BIDS_ROOT}"

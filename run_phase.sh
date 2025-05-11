@@ -4,8 +4,12 @@ set -euo pipefail
 PHASE="$1"        # MRIQC | SSW | AFNI
 shift             # remaining args forwarded to per‑subject script
 
+# TMPDIR with lots of space for tmp files
+export TMPDIR=/mydata/parallel_tmp
+
 source workflow.conf
 cd "$BIDS_ROOT"
+
 
 # 1) Subject list = all sub-* folders unless restricted by $SUBS env‑var
 SUBJECTS=${SUBJECT_LIST}

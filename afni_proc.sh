@@ -26,6 +26,9 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
+# tmpdir with lots of disk space
+export TMPDIR=/mydata/afni_tmp
+
 MYDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source "${MYDIR}/workflow.conf"
 cd "${BIDS_ROOT}"
