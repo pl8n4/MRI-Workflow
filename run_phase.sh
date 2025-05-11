@@ -11,6 +11,9 @@ source workflow.conf
 cd "$BIDS_ROOT"
 
 
+# --- group‑stage parallelism -----------------
+export OMP_NUM_THREADS="${AFNI_THREADS:-8}"
+
 # 1) Subject list = all sub-* folders unless restricted by $SUBS env‑var
 SUBJECTS=${SUBJECT_LIST}
 
@@ -36,9 +39,9 @@ export OMP_NUM_THREADS="$TPJ"   # per‑job thread fan‑out
 if [[ "$LAUNCHER" == "local" ]]; then
     parallel -u \
         -j "$PARALLEL" \
-        "$JOB" {} "$TPJ" "$RAM" ::: $SUBJECT_LIST \
-        > /dev/null 2>&1
+        "$JOB" {} "$TPJ" "$RAM" ::: $SUBJECT_LIST 
     
+    # --- optional group mriqc -------------------------------------------------
     if [[ "${PHASE}" == "MRIQC" && "${RUN_MRIQC_GROUP,,}" == "true" ]]; then
         echo "→ All MRIQC participant runs done; launching MRIQC group stage…"
         singularity exec --cleanenv \
@@ -46,6 +49,13 @@ if [[ "$LAUNCHER" == "local" ]]; then
             "${SIF_IMAGE}" \
             mriqc /data /data/derivatives/mriqc group
         echo "✔ group_*.tsv & group_*.html now in derivatives/mriqc/"
+    fi
+
+     # --- optional group analysis ----------------------------------------------
+    if [[ "${PHASE}" == "AFNI" && "${RUN_GROUP_AFNI,,}" == "true" ]]; then
+        echo "→ All AFNI subject runs finished; starting group‑level analysis…"
+        "${RUN_GROUP}" || { echo "❌ Group analysis failed" ; exit 1; }
+        echo "✔ Group step complete."
     fi
 
 else
