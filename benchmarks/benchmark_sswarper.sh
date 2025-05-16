@@ -5,11 +5,10 @@
 
 set -euo pipefail
 
-# ----------------- user parameters -----------------
+# user parameters
 SUBJ_LABEL=${1:-08}                 # subject to test, default = 08
 THREADS=(4 8 12 16 24 32)           # thread counts to trial
 REPS=2                              # how many repeats per setting
-# ---------------------------------------------------
 
 declare -A ELAPSED                   # associative array to hold times
 TIMEFORMAT='%R'                     # only capture the 'real' time (in seconds)

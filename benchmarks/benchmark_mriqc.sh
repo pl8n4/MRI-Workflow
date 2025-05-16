@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-# ----------------- user parameters -----------------
+# user parameters
 SUBJ_LABEL=${1:-08}                          # subject to test, default = 08
 DATA_ROOT=${DATA_ROOT:-$(pwd)}               # dataset root directory (override via DATA_ROOT)
 IMAGE_PATH=${IMAGE_PATH:-""}                 # MRIQC image path (override via IMAGE_PATH)
@@ -14,7 +14,6 @@ THREAD_LIST=${THREAD_LIST:-"4 8 12 16 24 32"} # thread counts (override via THRE
 REPS=${REPS:-2}                              # repeats per setting (override via REPS)
 RUN_SCRIPT=${RUN_SCRIPT:-"./run_mriqc.sh"}   # MRIQC wrapper script (override via RUN_SCRIPT)
 LOG_DIR=${LOG_DIR:-"$DATA_ROOT/benchmark_logs"} # where to store per‑run logs
-# ---------------------------------------------------
 
 mkdir -p "$LOG_DIR"
 cd "$DATA_ROOT"

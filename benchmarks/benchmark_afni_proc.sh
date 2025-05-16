@@ -5,11 +5,11 @@
 
 set -euo pipefail
 
-# ----------------- user parameters -----------------
+# user parameters
 SUBJ_LABEL=${1:-08}                 # subject to test, default = 08
 THREADS=(4 8 12 16 24 32)           # thread counts to trial
 REPS=2                              # how many repeats per setting
-# ---------------------------------------------------
+
 
 declare -A ELAPSED                   # associative array to hold times
 TIMEFORMAT='%R'                     # only capture the 'real' time (in seconds)
@@ -32,7 +32,7 @@ for ((rep=1; rep<=REPS; rep++)); do
   printf "%8s" "Run#$rep"
 done
 echo
-printf '%0.s-' {1..8}               # separator line
+printf '%0.s-' {1..8}
 for ((rep=1; rep<=REPS; rep++)); do
   printf '%8s' '--------'
 done
