@@ -14,6 +14,3 @@ cd "${BIDS_ROOT}"
 #"${MYDIR}/run_phase.sh" MRIQC
 "${MYDIR}/run_phase.sh" SSW
 "${MYDIR}/run_phase.sh" AFNI
-
-# Run group QC explicitly
-"${MYDIR}/run_group_qc.sh"

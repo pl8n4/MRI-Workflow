@@ -1,7 +1,6 @@
-#!/usr/bin/env bash
 # run_group_afni.sh  —  Group‑level AFNI statistics with 3dttest++
 #
-# * One‑sample test of the FOOD‑vs‑NONFOOD contrast across all subjects
+# * One‑sample test of the stim vs no stim contrast across all subjects
 # * Extensible to two‑sample or covariate models by editing the SETS section
 #
 # USAGE: ./run_group_afni.sh [contrast_label] [mask]
@@ -16,7 +15,7 @@ export TMPDIR=/mydata/group_afni_tmp
 
 MYDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source "${MYDIR}/workflow.conf"
-cd "${DERIV_ROOT}/afni_proc"          # each subject has its own directory
+cd "${DERIV_ROOT}/afni_proc"          
 
 CONTRAST="${1:-F-NF}"                 # must match the -glt_label in afni_proc
 MASK="${2:-}"                         # leave empty to let 3dttest++ auto‑mask
@@ -31,10 +30,9 @@ echo " Subjects found (setA)        : $TOTAL_SUBJECTS"
 echo " Output prefix               : $PREFIX"
 echo "-----------------------------------------------------------"
 
-# ----- Build the list of sub‑brick paths -------------------------------
+# Build the list of sub‑brick paths
 SET_A=()
 for SID in $SUBJECT_LIST ; do
-    # Allow flexible stats file naming
     if [[ -f sub-${SID}/stats.REML+tlrc.HEAD ]]; then
         STAT_BASENAME="sub-${SID}/stats.REML+tlrc"
     else
@@ -44,11 +42,10 @@ for SID in $SUBJECT_LIST ; do
         || { echo "❌ No stats.*_REML+tlrc file for sub-${SID}" ; exit 1; }
 
     coef="${STAT_BASENAME}[${CONTRAST}#0_Coef]"
-    # Ensure quotes here!
     SET_A+=("${coef}")
 done
 
-# ----- Launch 3dttest++ -------------------------------------------------
+# Launch 3dttest++
 3dttest++                             \
     -prefix   "$PREFIX"               \
     -setA     "${SET_A[@]}"           \
@@ -57,4 +54,3 @@ done
     -DAFNI_OMP_NUM_THREADS="${OMP_NUM_THREADS}"
 
 echo -e "\n✅  Group-level file written  →  ${PREFIX}+tlrc.*"
-echo    "    Inspect with afni or SUMA, or feed into 3dClusterize for thresholding."

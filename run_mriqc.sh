@@ -1,10 +1,10 @@
-#!/usr/bin/env bash
 # run_mriqc.sh  —  Run MRIQC for one subject with configurable cores & memory
 #
-# USAGE: ./run_mriqc.sh <SUBJECT_LABEL> [N_CORES] [MEM_GB]
-#   e.g. 08 16 32
+# This script runs MRIQC on a single subject using Singularity.
+# It generates an html report and quality metrics 
 #
-# This script assumes it’s run from a BIDS‑root directory.
+# Usage: ./run_mriqc.sh <SUBJECT_ID> [N_CORES] [MEM_GB]
+#
 # Outputs go into derivatives/mriqc, and tmp files into ./tmp.
 
 set -euo pipefail
